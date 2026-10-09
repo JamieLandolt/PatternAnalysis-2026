@@ -1,0 +1,11 @@
+# Never commit datasets, model weights or job logs (assessment rule)
+data/
+*.csv
+*.pt
+*.pth
+*.npy
+*.npz
+slurm-*.out
+logs/
+__pycache__/
+.ipynb_checkpoints/
