@@ -127,3 +127,12 @@ class RecurrentGAN(nn.Module):
 def count_parameters(model):
     """Number of trainable parameters."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def build_model(name, feat_dim, hidden_dim=64, num_layers=3):
+    """Create 'timegan' or 'baseline' with the given sizes."""
+    if name == "timegan":
+        return TimeGAN(feat_dim, hidden_dim, num_layers)
+    if name == "baseline":
+        return RecurrentGAN(feat_dim, hidden_dim, num_layers)
+    raise ValueError(f"unknown model '{name}' (expected 'timegan' or 'baseline')")
