@@ -188,7 +188,7 @@ def main():
     cols = ["audit_crossed", "audit_ladder", "audit_neg_depth", "kl_spread", "kl_return",
             "acf_lag1", "acf_lag5", "ssim", "ssim_mean_surface"]
     print("\nTest-split comparison (synthetic vs real test windows)")
-    print(f"{'':42s}" + "".join(f"{c.replace("audit_", "")[:13]:>14s}" for c in cols))
+    print(f"{'':42s}" + "".join(f"{c.replace('audit_', '')[:13]:>14s}" for c in cols))
     real_acf = metrics.abs_return_acf(test_raw)
     for label, row in {**results, **ref_row}.items():
         print(f"{label:42s}" + "".join(f"{row[c]:14.4f}" for c in cols))
