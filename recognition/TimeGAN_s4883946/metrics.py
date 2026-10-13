@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from skimage.metrics import structural_similarity
 
-from dataset import LEVELS, TICK
+from dataset import LEVELS, TICK, decode_distances
 
 ASK_DIST = slice(1, 1 + LEVELS)
 BID_DIST = slice(1 + LEVELS, 1 + 2 * LEVELS)
@@ -24,18 +24,19 @@ ASK_VOL = slice(1 + 2 * LEVELS, 1 + 3 * LEVELS)
 BID_VOL = slice(1 + 3 * LEVELS, 1 + 4 * LEVELS)
 
 
-def distances(raw):
+def distances(raw, ladder="levels"):
     """Ask and bid distances from the mid-price in dollars, each (N, T, 10)."""
-    return np.expm1(raw[..., ASK_DIST]) * TICK, np.expm1(raw[..., BID_DIST]) * TICK
+    return (decode_distances(raw[..., ASK_DIST], ladder) * TICK,
+            decode_distances(raw[..., BID_DIST], ladder) * TICK)
 
 
-def spreads(raw):
+def spreads(raw, ladder="levels"):
     """Bid-ask spread in dollars, (N, T). Negative or zero means a crossed book."""
-    ask_d, bid_d = distances(raw)
+    ask_d, bid_d = distances(raw, ladder)
     return ask_d[..., 0] + bid_d[..., 0]
 
 
-def microstructure_audit(raw):
+def microstructure_audit(raw, ladder="levels"):
     """Fraction of snapshots violating each market microstructure rule.
 
     crossed:  best ask <= best bid (spread <= 0)
@@ -44,7 +45,7 @@ def microstructure_audit(raw):
     any:      at least one of the above
     windows_with_crossed: fraction of windows containing at least one crossed snapshot
     """
-    ask_d, bid_d = distances(raw)
+    ask_d, bid_d = distances(raw, ladder)
     crossed = (ask_d[..., 0] + bid_d[..., 0]) <= 0
     ladder = ((np.diff(ask_d, axis=-1) < 0).any(-1)
               | (np.diff(bid_d, axis=-1) < 0).any(-1))
@@ -123,7 +124,7 @@ def ssim_mean_surface(synth_heatmaps, real_heatmaps):
                                        win_size=7))
 
 
-def evaluate(real_raw, synth_raw, reference_raw=None):
+def evaluate(real_raw, synth_raw, reference_raw=None, ladder="levels"):
     """Compare synthetic windows with real windows; returns a flat dict of metrics.
 
     reference_raw is the pool of real windows used for the SSIM nearest-neighbour
@@ -131,9 +132,9 @@ def evaluate(real_raw, synth_raw, reference_raw=None):
     """
     synth_raw = np.nan_to_num(synth_raw)
     ref = real_raw if reference_raw is None else reference_raw
-    audit = microstructure_audit(synth_raw)
+    audit = microstructure_audit(synth_raw, ladder)
     out = {f"audit_{k}": v for k, v in audit.items()}
-    out["kl_spread"] = kl_divergence(spreads(real_raw), spreads(synth_raw))
+    out["kl_spread"] = kl_divergence(spreads(real_raw, ladder), spreads(synth_raw, ladder))
     out["kl_return"] = kl_divergence(real_raw[..., 0], synth_raw[..., 0])
     for lag, v in abs_return_acf(synth_raw).items():
         out[f"acf_lag{lag}"] = v

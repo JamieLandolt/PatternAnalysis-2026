@@ -73,17 +73,36 @@ def book_to_levels(book):
     return ask_p, ask_v, bid_p, bid_v
 
 
-def build_features(book):
+def decode_distances(block, ladder="levels"):
+    """Price distances in ticks from a (..., 10) block of raw distance features.
+
+    levels:     feature = log1p(distance from mid at that level)
+    increments: first feature = log1p(distance of level 1); the others are
+                log1p(gap to the previous level). Real gaps are always >= 1 tick, so a
+                model has to output sensible gaps for the ladder to stay ordered; a
+                negative decoded gap is a ladder violation (nothing is enforced).
+    """
+    d = np.expm1(block)
+    return np.cumsum(d, axis=-1) if ladder == "increments" else d
+
+
+def build_features(book, ladder="levels"):
     """Turn (K, 40) book snapshots into a (K, 41) raw feature array.
 
     Returns the features and the mid-price series (needed to rebuild prices).
     """
+    if ladder not in ("levels", "increments"):
+        raise ValueError(f"unknown ladder representation '{ladder}'")
     ask_p, ask_v, bid_p, bid_v = book_to_levels(book)
     mid = (ask_p[:, 0] + bid_p[:, 0]) / 2
     ret = np.zeros(len(mid))
     ret[1:] = np.diff(np.log(mid))   # first step has no previous snapshot
-    ask_dist = np.log1p((ask_p - mid[:, None]) / TICK)
-    bid_dist = np.log1p((mid[:, None] - bid_p) / TICK)
+    ask_ticks = (ask_p - mid[:, None]) / TICK
+    bid_ticks = (mid[:, None] - bid_p) / TICK
+    if ladder == "increments":   # keep level 1, replace the rest by gaps between levels
+        ask_ticks = np.concatenate([ask_ticks[:, :1], np.diff(ask_ticks, axis=1)], axis=1)
+        bid_ticks = np.concatenate([bid_ticks[:, :1], np.diff(bid_ticks, axis=1)], axis=1)
+    ask_dist, bid_dist = np.log1p(ask_ticks), np.log1p(bid_ticks)
     feats = np.concatenate(
         [ret[:, None], ask_dist, bid_dist, np.log1p(ask_v), np.log1p(bid_v)], axis=1
     )
@@ -164,7 +183,8 @@ class LOBWindowDataset(Dataset):
 
 
 def get_dataloaders(data_dir, seq_len=24, step=1.0, stride=1, batch_size=128,
-                    fractions=(0.6, 0.2, 0.2), return_transform="zscore", clip_q=0.5):
+                    fractions=(0.6, 0.2, 0.2), return_transform="zscore", clip_q=0.5,
+                    ladder="levels"):
     """Build train/val/test DataLoaders and return them with preprocessing metadata.
 
     Normalisation statistics (mean/std per feature) come from the training split
@@ -173,7 +193,7 @@ def get_dataloaders(data_dir, seq_len=24, step=1.0, stride=1, batch_size=128,
     """
     times, book = load_lob(data_dir)
     grid, snaps = resample_to_grid(times, book, step)
-    feats, mid = build_features(snaps)
+    feats, mid = build_features(snaps, ladder)
     splits = chronological_split(len(feats), fractions)
 
     tr0, tr1 = splits["train"]
@@ -196,7 +216,7 @@ def get_dataloaders(data_dir, seq_len=24, step=1.0, stride=1, batch_size=128,
         )
     info = {"mean": mean, "std": std, "splits": splits, "grid": grid, "mid": mid,
             "feats_raw": feats, "seq_len": seq_len, "step": step, "return_tf": tf,
-            "stride": stride}
+            "stride": stride, "ladder": ladder}
     return loaders, info
 
 
@@ -213,7 +233,7 @@ def real_windows(info, split):
     return make_windows(info["feats_raw"][s0:s1], info["seq_len"], info["stride"])
 
 
-def features_to_book(raw, start_mid):
+def features_to_book(raw, start_mid, ladder="levels"):
     """Rebuild prices (dollars) and volumes from raw features of one window.
 
     raw: (seq_len, 41) raw features; start_mid: mid-price before the first step.
@@ -221,8 +241,8 @@ def features_to_book(raw, start_mid):
     (crossed books, non-monotonic ladders) are kept as-is so they can be audited.
     """
     mid = start_mid * np.exp(np.cumsum(raw[:, 0]))
-    ask_dist = np.expm1(raw[:, 1:1 + LEVELS]) * TICK
-    bid_dist = np.expm1(raw[:, 1 + LEVELS:1 + 2 * LEVELS]) * TICK
+    ask_dist = decode_distances(raw[:, 1:1 + LEVELS], ladder) * TICK
+    bid_dist = decode_distances(raw[:, 1 + LEVELS:1 + 2 * LEVELS], ladder) * TICK
     ask_v = np.expm1(raw[:, 1 + 2 * LEVELS:1 + 3 * LEVELS])
     bid_v = np.expm1(raw[:, 1 + 3 * LEVELS:])
     return mid[:, None] + ask_dist, ask_v, mid[:, None] - bid_dist, bid_v

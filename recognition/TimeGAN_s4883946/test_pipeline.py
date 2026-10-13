@@ -201,6 +201,43 @@ class TestMetrics(unittest.TestCase):
         self.assertAlmostEqual(metrics.ssim_to_nearest(h, h, n=20), 1.0, places=6)
 
 
+class TestLadderRepresentation(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        make_fake_lob(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_increments_roundtrip_recovers_book(self):
+        times, book = load_lob(self.tmp.name)
+        _, snaps = resample_to_grid(times, book)
+        feats, mid = build_features(snaps, ladder="increments")
+        s = 50
+        ask_p, _, bid_p, _ = features_to_book(feats[s:s + 24], mid[s - 1], ladder="increments")
+        r_ask_p, _, r_bid_p, _ = book_to_levels(snaps)
+        np.testing.assert_allclose(ask_p, r_ask_p[s:s + 24], atol=1e-8)
+        np.testing.assert_allclose(bid_p, r_bid_p[s:s + 24], atol=1e-8)
+
+    def test_real_data_has_no_violations_in_either_representation(self):
+        for ladder in ("levels", "increments"):
+            loaders, info = get_dataloaders(self.tmp.name, ladder=ladder)
+            raw = real_windows(info, "test")
+            self.assertEqual(metrics.microstructure_audit(raw, ladder)["any"], 0.0, ladder)
+
+    def test_negative_increment_is_a_ladder_violation(self):
+        loaders, info = get_dataloaders(self.tmp.name, ladder="increments")
+        bad = real_windows(info, "test").copy()
+        bad[..., metrics.ASK_DIST][..., 3] = -1.0   # decoded gap expm1(-1) < 0
+        self.assertGreater(metrics.microstructure_audit(bad, "increments")["ladder"], 0.9)
+
+    def test_unknown_ladder_raises(self):
+        with self.assertRaises(ValueError):
+            build_features(np.zeros((3, 40)), ladder="nope")
+
+
 class TestReturnTransform(unittest.TestCase):
     def setUp(self):
         rng = np.random.default_rng(0)
@@ -275,7 +312,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_train_with_experiment_options(self):
         """All experiment flags run end to end and are recorded in the summary."""
-        flags = ["--feature-adv", "--w-diff", "10", "--lr-schedule", "cosine",
+        flags = ["--ladder", "increments", "--feature-adv", "--w-diff", "10", "--lr-schedule", "cosine",
                  "--return-transform", "quantile", "--w-moment", "10", "--w-sup", "10"]
         with tempfile.TemporaryDirectory() as data, tempfile.TemporaryDirectory() as out:
             make_fake_lob(data)

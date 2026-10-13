@@ -3,6 +3,7 @@
 #   ./run_experiments.sh transform      # return-transform ablation (zscore/clip/quantile)
 #   ./run_experiments.sh step           # grid step size (0.5/1/5/10 s)
 #   ./run_experiments.sh loss           # TimeGAN loss weights, feature discriminator, cosine LR
+#   ./run_experiments.sh ladder         # price ladder as distances vs gaps between levels
 #   ./run_experiments.sh depth          # difference moment-matching loss for depth persistence
 # Results land in outputs/<group>/<setting>/<model>_s<seed>/ (gitignored).
 export PATH=/opt/slurm/bin:$PATH
@@ -35,6 +36,8 @@ for seed in $SEEDS; do
       depth)
         submit diff10   $model $seed --w-diff 10
         submit diff100  $model $seed --w-diff 100 ;;
+      ladder)
+        for l in levels increments; do submit $l $model $seed --ladder $l; done ;;
       *) echo "unknown group $GROUP"; exit 1 ;;
     esac
   done

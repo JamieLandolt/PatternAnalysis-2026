@@ -215,6 +215,8 @@ def main():
     p.add_argument("--step", type=float, default=1.0, help="grid step in seconds")
     p.add_argument("--return-transform", choices=["zscore", "clip", "quantile"],
                    default="zscore", help="transform applied to the mid-return feature")
+    p.add_argument("--ladder", choices=["levels", "increments"], default="levels",
+                   help="price ladder features: distance per level, or gaps between levels")
     p.add_argument("--clip-q", type=float, default=0.5, help="clip percentile for --return-transform clip")
     p.add_argument("--hidden", type=int, default=64)
     p.add_argument("--layers", type=int, default=3)
@@ -244,7 +246,8 @@ def main():
 
     loaders, info = get_dataloaders(args.data_dir, args.seq_len, args.step,
                                     batch_size=args.batch_size,
-                                    return_transform=args.return_transform, clip_q=args.clip_q)
+                                    return_transform=args.return_transform, clip_q=args.clip_q,
+                                    ladder=args.ladder)
     raw = {k: real_windows(info, k) for k in loaders}   # untransformed real windows
     model = build_model(args.model, N_FEATURES, args.hidden, args.layers,
                         feature_adv=args.feature_adv).to(device)
@@ -260,7 +263,8 @@ def main():
         """Validation: score generated windows against the validation split."""
         if (epoch + 1) % args.eval_every and epoch + 1 != args.epochs:
             return
-        res = metrics.evaluate(raw["val"], synth_raw(args.n_eval), reference_raw=raw["train"])
+        res = metrics.evaluate(raw["val"], synth_raw(args.n_eval), reference_raw=raw["train"],
+                               ladder=args.ladder)
         res["epoch"] = epoch + 1
         history["val"].append(res)
         score = res["kl_spread"] + res["kl_return"]
@@ -279,11 +283,12 @@ def main():
 
     # Test with the best-validation checkpoint (test split used only here)
     model.load_state_dict(best["state"])
-    test = metrics.evaluate(raw["test"], synth_raw(args.n_eval), reference_raw=raw["train"])
+    test = metrics.evaluate(raw["test"], synth_raw(args.n_eval), reference_raw=raw["train"],
+                          ladder=args.ladder)
     # Real-data reference at this grid step: how far real training windows are from the
     # real test windows (the floor any generator is measured against)
     reference = metrics.evaluate(raw["test"], raw["train"][:: max(1, len(raw["train"]) // args.n_eval)],
-                                 reference_raw=raw["test"])
+                                 reference_raw=raw["test"], ladder=args.ladder)
     t1 = time.time(); model.sample(1000, args.seq_len, device); latency = time.time() - t1
     profile = {
         "parameters": count_parameters(model), "train_seconds": train_seconds,

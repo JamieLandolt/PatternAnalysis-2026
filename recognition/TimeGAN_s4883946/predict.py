@@ -24,6 +24,7 @@ import metrics
 from dataset import LEVELS, N_FEATURES, TICK, denormalise, get_dataloaders, real_windows
 from modules import build_model
 
+LADDER = "levels"   # set from the checkpoint in main()
 COLOURS = {"real": "black", "timegan": "tab:blue", "baseline": "tab:orange"}
 
 
@@ -64,13 +65,13 @@ def fig_heatmaps(real_raw, synth, out, n_cols=4, seed=0):
 
 def fig_distributions(real_raw, synth, out):
     fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
-    sp_real = metrics.spreads(real_raw).ravel()
+    sp_real = metrics.spreads(real_raw, LADDER).ravel()
     lo, hi = np.percentile(sp_real, [0.5, 99.5])
     pad = (hi - lo) * 0.5
     bins = np.linspace(lo - pad, hi + pad, 60)
     axes[0].hist(sp_real, bins, density=True, histtype="step", color=COLOURS["real"], label="real")
     for n, raw in synth.items():
-        axes[0].hist(metrics.spreads(raw).ravel(), bins, density=True, histtype="step",
+        axes[0].hist(metrics.spreads(raw, LADDER).ravel(), bins, density=True, histtype="step",
                      color=COLOURS[n], label=n)
     axes[0].set_xlabel("spread ($)"); axes[0].set_title("Spread distribution"); axes[0].legend()
     r_real = real_raw[..., 0].ravel()
@@ -121,7 +122,7 @@ def fig_violations(audits, out):
 
 def violation_score(raw):
     """Per-snapshot badness: how far the book is from valid (0 means valid)."""
-    ask_d, bid_d = metrics.distances(raw)
+    ask_d, bid_d = metrics.distances(raw, LADDER)
     crossed = np.clip(-(ask_d[..., 0] + bid_d[..., 0]), 0, None)
     ladder = (np.clip(-np.diff(ask_d, axis=-1), 0, None).sum(-1)
               + np.clip(-np.diff(bid_d, axis=-1), 0, None).sum(-1))
@@ -130,13 +131,13 @@ def violation_score(raw):
 
 def fig_autopsy(real_raw, synth, out, k=3):
     """Worst generated snapshots per model: price distance by level vs a real snapshot."""
-    ask_r, bid_r = metrics.distances(real_raw[:1])
+    ask_r, bid_r = metrics.distances(real_raw[:1], LADDER)
     levels = np.arange(1, LEVELS + 1)
     fig, axes = plt.subplots(len(synth), k, figsize=(3.6 * k, 3 * len(synth)), squeeze=False)
     for r, (name, raw) in enumerate(synth.items()):
         score = violation_score(raw).ravel()
         worst = np.argsort(score)[::-1][:k]
-        ask_d, bid_d = metrics.distances(raw)
+        ask_d, bid_d = metrics.distances(raw, LADDER)
         for c, idx in enumerate(worst):
             w, t = divmod(idx, raw.shape[1])
             ax = axes[r, c]
@@ -172,7 +173,10 @@ def main():
     cfg = next(iter(cfgs.values()))
     loaders, info = get_dataloaders(args.data_dir, cfg["seq_len"], cfg["step"],
                                     return_transform=cfg.get("return_transform", "zscore"),
-                                    clip_q=cfg.get("clip_q", 0.5))
+                                    clip_q=cfg.get("clip_q", 0.5),
+                                    ladder=cfg.get("ladder", "levels"))
+    global LADDER
+    LADDER = cfg.get("ladder", "levels")
     train_raw, test_raw = real_windows(info, "train"), real_windows(info, "test")
 
     synth = {n: denormalise(m.sample(args.n_samples, cfg["seq_len"], device).numpy(), info)
@@ -183,9 +187,9 @@ def main():
     # (train windows act as the "synthetic" candidates; test windows are the references,
     # so no window is compared with itself)
     ref = metrics.evaluate(test_raw, train_raw[:: max(1, len(train_raw) // args.n_samples)],
-                           reference_raw=test_raw)
+                           reference_raw=test_raw, ladder=LADDER)
     ref_row = {"real train period -> test (reference)": ref}
-    results = {n: metrics.evaluate(test_raw, s, reference_raw=train_raw) for n, s in synth.items()}
+    results = {n: metrics.evaluate(test_raw, s, reference_raw=train_raw, ladder=LADDER) for n, s in synth.items()}
 
     cols = ["audit_crossed", "audit_ladder", "audit_neg_depth", "kl_spread", "kl_return",
             "acf_lag1", "acf_lag5", "ssim", "ssim_mean_surface"]
