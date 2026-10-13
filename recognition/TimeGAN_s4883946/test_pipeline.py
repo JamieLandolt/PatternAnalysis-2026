@@ -17,9 +17,10 @@ import numpy as np
 import torch
 
 import metrics
-from dataset import (LEVELS, N_FEATURES, PREFIX, PRICE_SCALE, book_to_levels,
-                     build_features, chronological_split, denormalise,
-                     features_to_book, get_dataloaders, load_lob, resample_to_grid)
+from dataset import (LEVELS, N_FEATURES, PREFIX, PRICE_SCALE, apply_return_transform,
+                     book_to_levels, build_features, chronological_split, denormalise,
+                     features_to_book, fit_return_transform, get_dataloaders,
+                     invert_return_transform, load_lob, real_windows, resample_to_grid)
 from modules import RecurrentGAN, TimeGAN, build_model, count_parameters
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -191,6 +192,53 @@ class TestMetrics(unittest.TestCase):
     def test_ssim_identical_heatmaps_is_one(self):
         h = metrics.depth_heatmaps(self.raw[:50])
         self.assertAlmostEqual(metrics.ssim_to_nearest(h, h, n=20), 1.0, places=6)
+
+
+class TestReturnTransform(unittest.TestCase):
+    def setUp(self):
+        rng = np.random.default_rng(0)
+        self.r = np.concatenate([np.zeros(700), rng.standard_t(2, 300) * 1e-4])
+
+    def test_quantile_roundtrip_is_exact(self):
+        tf = fit_return_transform(self.r, "quantile")
+        z = apply_return_transform(self.r, tf)
+        np.testing.assert_allclose(invert_return_transform(z, tf), self.r, atol=1e-12)
+
+    def test_quantile_band_around_zero_decodes_to_exact_zero(self):
+        tf = fit_return_transform(self.r, "quantile")
+        out = invert_return_transform(np.array([-0.9, -0.3, 0.0, 0.3, 0.9]), tf)
+        np.testing.assert_array_equal(out, np.zeros(5))
+
+    def test_clip_limits_extremes_and_zscore_is_identity(self):
+        tf = fit_return_transform(self.r, "clip", clip_q=1.0)
+        z = apply_return_transform(self.r, tf)
+        self.assertLessEqual(float(z.max()), tf["hi"] + 1e-15)
+        self.assertLess(float(z.max()), float(self.r.max()))
+        tf0 = fit_return_transform(self.r, "zscore")
+        np.testing.assert_array_equal(apply_return_transform(self.r, tf0), self.r)
+
+    def test_unknown_transform_raises(self):
+        with self.assertRaises(ValueError):
+            fit_return_transform(self.r, "nope")
+
+    def test_dataloaders_with_each_transform(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_fake_lob(d)
+            for kind in ("zscore", "clip", "quantile"):
+                loaders, info = get_dataloaders(d, return_transform=kind)
+                real = real_windows(info, "test")
+                self.assertEqual(real.shape[1:], (24, N_FEATURES))
+                back = denormalise(loaders["test"].dataset.windows.numpy(), info)
+                # every feature except the return is recovered exactly
+                np.testing.assert_allclose(back[..., 1:], real[..., 1:], atol=1e-5)
+                if kind == "zscore":
+                    np.testing.assert_allclose(back[..., 0], real[..., 0], atol=1e-9)
+                elif kind == "quantile":
+                    # fitted on train only, so unseen test returns map to the nearest
+                    # training quantile: zeros stay exactly zero, errors stay small
+                    np.testing.assert_array_equal(back[..., 0][real[..., 0] == 0], 0.0)
+                    self.assertLess(np.abs(back[..., 0] - real[..., 0]).max(),
+                                    real[..., 0].std())
 
 
 class TestEndToEnd(unittest.TestCase):

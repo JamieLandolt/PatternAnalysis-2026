@@ -30,7 +30,7 @@ import torch
 from torch import nn
 
 import metrics
-from dataset import N_FEATURES, denormalise, get_dataloaders
+from dataset import N_FEATURES, denormalise, get_dataloaders, real_windows
 from modules import build_model, count_parameters
 
 GAMMA = 1.0          # weight of the discriminator term on raw generator output
@@ -188,6 +188,9 @@ def main():
     p.add_argument("--out-dir", default="outputs")
     p.add_argument("--seq-len", type=int, default=24)
     p.add_argument("--step", type=float, default=1.0, help="grid step in seconds")
+    p.add_argument("--return-transform", choices=["zscore", "clip", "quantile"],
+                   default="zscore", help="transform applied to the mid-return feature")
+    p.add_argument("--clip-q", type=float, default=0.5, help="clip percentile for --return-transform clip")
     p.add_argument("--hidden", type=int, default=64)
     p.add_argument("--layers", type=int, default=3)
     p.add_argument("--batch-size", type=int, default=128)
@@ -208,8 +211,9 @@ def main():
     device = pick_device(args.device)
 
     loaders, info = get_dataloaders(args.data_dir, args.seq_len, args.step,
-                                    batch_size=args.batch_size)
-    raw = {k: denormalise(l.dataset.windows.numpy(), info) for k, l in loaders.items()}
+                                    batch_size=args.batch_size,
+                                    return_transform=args.return_transform, clip_q=args.clip_q)
+    raw = {k: real_windows(info, k) for k in loaders}   # untransformed real windows
     model = build_model(args.model, N_FEATURES, args.hidden, args.layers).to(device)
     print(f"{args.model}: {count_parameters(model):,} parameters on {device}", flush=True)
 
@@ -243,6 +247,10 @@ def main():
     # Test with the best-validation checkpoint (test split used only here)
     model.load_state_dict(best["state"])
     test = metrics.evaluate(raw["test"], synth_raw(args.n_eval), reference_raw=raw["train"])
+    # Real-data reference at this grid step: how far real training windows are from the
+    # real test windows (the floor any generator is measured against)
+    reference = metrics.evaluate(raw["test"], raw["train"][:: max(1, len(raw["train"]) // args.n_eval)],
+                                 reference_raw=raw["test"])
     t1 = time.time(); model.sample(1000, args.seq_len, device); latency = time.time() - t1
     profile = {
         "parameters": count_parameters(model), "train_seconds": train_seconds,
@@ -258,7 +266,7 @@ def main():
                f"{args.out_dir}/{args.model}.pt")
     with open(f"{args.out_dir}/{args.model}_summary.json", "w") as f:
         json.dump({"args": vars(args), "best_epoch": best["epoch"], "test": test,
-                   "profile": profile, "history": history}, f, indent=2)
+                   "reference": reference, "profile": profile, "history": history}, f, indent=2)
 
 
 if __name__ == "__main__":

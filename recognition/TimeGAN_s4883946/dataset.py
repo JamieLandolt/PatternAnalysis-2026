@@ -25,6 +25,7 @@ import sys
 
 import numpy as np
 import torch
+from scipy.special import ndtr, ndtri
 from torch.utils.data import DataLoader, Dataset
 
 PREFIX = "AMZN_2012-06-21_34200000_57600000_"
@@ -89,6 +90,45 @@ def build_features(book):
     return feats, mid
 
 
+def fit_return_transform(train_returns, kind="zscore", clip_q=0.5):
+    """Fit an optional transform for the mid-return feature on training data only.
+
+    zscore:   no transform (the usual z-scoring happens later for every feature)
+    clip:     winsorise at the clip_q and 100-clip_q percentiles, so a few extreme
+              returns cannot dominate the mean/std or the losses
+    quantile: map returns to normal scores through their empirical CDF. Ties get their
+              mid-rank, so the ~70% exact zeros all map to one value; inverting through
+              the empirical quantile function sends a whole band of normal scores back
+              to exactly 0, so a generator does not have to output exact zeros.
+    """
+    if kind not in ("zscore", "clip", "quantile"):
+        raise ValueError(f"unknown return transform '{kind}'")
+    tf = {"kind": kind}
+    if kind == "clip":
+        tf["lo"], tf["hi"] = np.percentile(train_returns, [clip_q, 100 - clip_q])
+    elif kind == "quantile":
+        tf["sorted"] = np.sort(train_returns)
+    return tf
+
+
+def apply_return_transform(r, tf):
+    if tf["kind"] == "clip":
+        return np.clip(r, tf["lo"], tf["hi"])
+    if tf["kind"] == "quantile":
+        s = tf["sorted"]
+        mid_rank = (np.searchsorted(s, r, "left") + np.searchsorted(s, r, "right")) / 2
+        return ndtri(np.clip(mid_rank / len(s), 0.5 / len(s), 1 - 0.5 / len(s)))
+    return r
+
+
+def invert_return_transform(z, tf):
+    """Undo apply_return_transform (clipping cannot be undone and is left as is)."""
+    if tf["kind"] == "quantile":
+        s = tf["sorted"]
+        return np.interp(ndtr(z), (np.arange(len(s)) + 0.5) / len(s), s)
+    return z
+
+
 def chronological_split(n_steps, fractions=(0.6, 0.2, 0.2)):
     """Contiguous (start, end) index ranges for train/val/test in time order.
 
@@ -124,7 +164,7 @@ class LOBWindowDataset(Dataset):
 
 
 def get_dataloaders(data_dir, seq_len=24, step=1.0, stride=1, batch_size=128,
-                    fractions=(0.6, 0.2, 0.2)):
+                    fractions=(0.6, 0.2, 0.2), return_transform="zscore", clip_q=0.5):
     """Build train/val/test DataLoaders and return them with preprocessing metadata.
 
     Normalisation statistics (mean/std per feature) come from the training split
@@ -137,9 +177,13 @@ def get_dataloaders(data_dir, seq_len=24, step=1.0, stride=1, batch_size=128,
     splits = chronological_split(len(feats), fractions)
 
     tr0, tr1 = splits["train"]
-    mean = feats[tr0:tr1].mean(axis=0)
-    std = feats[tr0:tr1].std(axis=0) + 1e-8   # epsilon guards against constant features
-    norm = (feats - mean) / std
+    # Optional transform of the return feature (fitted on the training split only)
+    tf = fit_return_transform(feats[tr0:tr1, 0], return_transform, clip_q)
+    model_feats = feats.copy()
+    model_feats[:, 0] = apply_return_transform(feats[:, 0], tf)
+    mean = model_feats[tr0:tr1].mean(axis=0)
+    std = model_feats[tr0:tr1].std(axis=0) + 1e-8   # epsilon guards against constant features
+    norm = (model_feats - mean) / std
 
     loaders = {}
     for name, (s0, s1) in splits.items():
@@ -151,13 +195,22 @@ def get_dataloaders(data_dir, seq_len=24, step=1.0, stride=1, batch_size=128,
             drop_last=(name == "train"),
         )
     info = {"mean": mean, "std": std, "splits": splits, "grid": grid, "mid": mid,
-            "feats_raw": feats, "seq_len": seq_len, "step": step}
+            "feats_raw": feats, "seq_len": seq_len, "step": step, "return_tf": tf,
+            "stride": stride}
     return loaders, info
 
 
 def denormalise(windows, info):
-    """Undo z-scoring: (…, n_features) normalised -> raw features."""
-    return np.asarray(windows) * info["std"] + info["mean"]
+    """Undo normalisation: (..., n_features) model space -> raw features."""
+    raw = np.asarray(windows) * info["std"] + info["mean"]
+    raw[..., 0] = invert_return_transform(raw[..., 0], info["return_tf"])
+    return raw
+
+
+def real_windows(info, split):
+    """Real raw (untransformed) windows of a split, for use as the evaluation reference."""
+    s0, s1 = info["splits"][split]
+    return make_windows(info["feats_raw"][s0:s1], info["seq_len"], info["stride"])
 
 
 def features_to_book(raw, start_mid):

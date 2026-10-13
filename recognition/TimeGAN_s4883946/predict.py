@@ -21,7 +21,7 @@ import numpy as np
 import torch
 
 import metrics
-from dataset import LEVELS, N_FEATURES, TICK, denormalise, get_dataloaders
+from dataset import LEVELS, N_FEATURES, TICK, denormalise, get_dataloaders, real_windows
 from modules import build_model
 
 COLOURS = {"real": "black", "timegan": "tab:blue", "baseline": "tab:orange"}
@@ -169,9 +169,10 @@ def main():
     for name in args.models:
         models[name], cfgs[name] = load_model(f"{args.model_dir}/{name}.pt", device)
     cfg = next(iter(cfgs.values()))
-    loaders, info = get_dataloaders(args.data_dir, cfg["seq_len"], cfg["step"])
-    train_raw = denormalise(loaders["train"].dataset.windows.numpy(), info)
-    test_raw = denormalise(loaders["test"].dataset.windows.numpy(), info)
+    loaders, info = get_dataloaders(args.data_dir, cfg["seq_len"], cfg["step"],
+                                    return_transform=cfg.get("return_transform", "zscore"),
+                                    clip_q=cfg.get("clip_q", 0.5))
+    train_raw, test_raw = real_windows(info, "train"), real_windows(info, "test")
 
     synth = {n: denormalise(m.sample(args.n_samples, cfg["seq_len"], device).numpy(), info)
              for n, m in models.items()}
