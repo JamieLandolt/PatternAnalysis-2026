@@ -48,6 +48,12 @@ def temporal_loss(h, h_sup):
     return nn.functional.mse_loss(h[:, 1:], h_sup[:, :-1])
 
 
+def diff_moment_loss(x_hat, x):
+    """Moment matching on first differences over time, so generated sequences copy how
+    much the real features change from one step to the next (hold-then-jump behaviour)."""
+    return moment_loss(x_hat[:, 1:] - x_hat[:, :-1], x[:, 1:] - x[:, :-1])
+
+
 def moment_loss(x_hat, x):
     """Match per-feature mean and std (over the batch) of generated and real data."""
     std_hat = torch.sqrt(x_hat.var(dim=0) + 1e-6)
@@ -73,6 +79,11 @@ def train_timegan(model, loaders, args, device, history, evaluator):
     opt_e = torch.optim.Adam(list(model.embedder.parameters())
                              + list(model.recovery.parameters()), lr=lr)
     opt_d = torch.optim.Adam(model.discriminator.parameters(), lr=lr)
+    opt_dx = (torch.optim.Adam(model.feature_discriminator.parameters(), lr=lr)
+              if model.feature_discriminator is not None else None)
+    joint_opts = [opt_g, opt_e, opt_d] + ([opt_dx] if opt_dx else [])
+    schedulers = ([torch.optim.lr_scheduler.CosineAnnealingLR(o, T_max=max(args.epochs, 1))
+                   for o in joint_opts] if args.lr_schedule == "cosine" else [])
     ones = lambda t: torch.ones_like(t)
     zeros = lambda t: torch.zeros_like(t)
 
@@ -111,8 +122,13 @@ def train_timegan(model, loaders, args, device, history, evaluator):
                 x_hat = model.recovery(h_hat)
                 y_fake, y_fake_e = model.discriminator(h_hat), model.discriminator(e_hat)
                 g_loss = (bce(y_fake, ones(y_fake)) + GAMMA * bce(y_fake_e, ones(y_fake_e))
-                          + 100 * torch.sqrt(temporal_loss(h.detach(), model.supervisor(h.detach())))
-                          + 100 * moment_loss(x_hat, x))
+                          + args.w_sup * torch.sqrt(temporal_loss(h.detach(), model.supervisor(h.detach())))
+                          + args.w_moment * moment_loss(x_hat, x))
+                if args.w_diff:
+                    g_loss = g_loss + args.w_diff * diff_moment_loss(x_hat, x)
+                if opt_dx:  # also fool the feature-space discriminator
+                    y_x = model.feature_discriminator(x_hat)
+                    g_loss = g_loss + bce(y_x, ones(y_x))
                 opt_g.zero_grad(); g_loss.backward(); opt_g.step()
 
                 h = model.embedder(x)
@@ -130,10 +146,19 @@ def train_timegan(model, loaders, args, device, history, evaluator):
                       + GAMMA * bce(y_fake_e, zeros(y_fake_e)))
             if d_loss.item() > D_THRESHOLD:
                 opt_d.zero_grad(); d_loss.backward(); opt_d.step()
+            if opt_dx:
+                with torch.no_grad():
+                    x_fake = model.recovery(h_hat)
+                y_xr, y_xf = model.feature_discriminator(x), model.feature_discriminator(x_fake)
+                dx_loss = bce(y_xr, ones(y_xr)) + bce(y_xf, zeros(y_xf))
+                if dx_loss.item() > D_THRESHOLD:
+                    opt_dx.zero_grad(); dx_loss.backward(); opt_dx.step()
             g_l.append(g_loss.item()); e_l.append(e_loss.item()); d_l.append(d_loss.item())
         history["g_loss"].append(float(np.mean(g_l)))
         history["e_loss"].append(float(np.mean(e_l)))
         history["d_loss"].append(float(np.mean(d_l)))
+        for sch in schedulers:
+            sch.step()
         print(f"[JOINT {epoch + 1}/{args.epochs}] G {history['g_loss'][-1]:.3f} "
               f"E {history['e_loss'][-1]:.3f} D {history['d_loss'][-1]:.3f}", flush=True)
         evaluator(epoch)
@@ -198,6 +223,13 @@ def main():
     p.add_argument("--ae-epochs", type=int, default=10)
     p.add_argument("--sup-epochs", type=int, default=10)
     p.add_argument("--epochs", type=int, default=30, help="joint / GAN epochs")
+    p.add_argument("--w-sup", type=float, default=100.0, help="TimeGAN supervised-loss weight")
+    p.add_argument("--w-moment", type=float, default=100.0, help="TimeGAN mean/std matching weight")
+    p.add_argument("--w-diff", type=float, default=0.0,
+                   help="weight of moment matching on first differences over time (0 = off)")
+    p.add_argument("--feature-adv", action="store_true",
+                   help="TimeGAN: add a discriminator on decoded features")
+    p.add_argument("--lr-schedule", choices=["none", "cosine"], default="none")
     p.add_argument("--eval-every", type=int, default=5)
     p.add_argument("--n-eval", type=int, default=2000, help="synthetic windows per evaluation")
     p.add_argument("--max-batches", type=int, default=None, help="limit batches per epoch (smoke tests)")
@@ -214,7 +246,8 @@ def main():
                                     batch_size=args.batch_size,
                                     return_transform=args.return_transform, clip_q=args.clip_q)
     raw = {k: real_windows(info, k) for k in loaders}   # untransformed real windows
-    model = build_model(args.model, N_FEATURES, args.hidden, args.layers).to(device)
+    model = build_model(args.model, N_FEATURES, args.hidden, args.layers,
+                        feature_adv=args.feature_adv).to(device)
     print(f"{args.model}: {count_parameters(model):,} parameters on {device}", flush=True)
 
     history = {"ae_loss": [], "sup_loss": [], "g_loss": [], "e_loss": [], "d_loss": [], "val": []}

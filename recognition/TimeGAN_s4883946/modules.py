@@ -84,7 +84,8 @@ class SequenceDiscriminator(GRUHead):
 class TimeGAN(nn.Module):
     """Container for the five TimeGAN networks plus a sampling helper."""
 
-    def __init__(self, feat_dim, hidden_dim=64, num_layers=3, noise_dim=None):
+    def __init__(self, feat_dim, hidden_dim=64, num_layers=3, noise_dim=None,
+                 feature_adv=False):
         super().__init__()
         self.feat_dim = feat_dim
         self.noise_dim = noise_dim or feat_dim
@@ -93,6 +94,10 @@ class TimeGAN(nn.Module):
         self.generator = LatentGenerator(self.noise_dim, hidden_dim, num_layers)
         self.supervisor = Supervisor(hidden_dim, num_layers)
         self.discriminator = SequenceDiscriminator(hidden_dim, hidden_dim, num_layers)
+        # Optional extension (not in the original paper): a second discriminator that sees
+        # decoded *features*, so the recovery network is also penalised for wrong marginals
+        self.feature_discriminator = (SequenceDiscriminator(feat_dim, hidden_dim, num_layers)
+                                      if feature_adv else None)
 
     def noise(self, batch, seq_len, device=None):
         return torch.randn(batch, seq_len, self.noise_dim, device=device)
@@ -129,10 +134,10 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def build_model(name, feat_dim, hidden_dim=64, num_layers=3):
+def build_model(name, feat_dim, hidden_dim=64, num_layers=3, feature_adv=False):
     """Create 'timegan' or 'baseline' with the given sizes."""
     if name == "timegan":
-        return TimeGAN(feat_dim, hidden_dim, num_layers)
+        return TimeGAN(feat_dim, hidden_dim, num_layers, feature_adv=feature_adv)
     if name == "baseline":
         return RecurrentGAN(feat_dim, hidden_dim, num_layers)
     raise ValueError(f"unknown model '{name}' (expected 'timegan' or 'baseline')")

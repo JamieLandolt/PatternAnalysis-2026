@@ -127,6 +127,13 @@ class TestModules(unittest.TestCase):
         self.assertTrue(all(p.grad is not None for p in t.embedder.parameters()))
         self.assertGreater(count_parameters(t), 0)
 
+    def test_feature_discriminator_is_optional(self):
+        self.assertIsNone(TimeGAN(N_FEATURES, 16, 2).feature_discriminator)
+        t = TimeGAN(N_FEATURES, 16, 2, feature_adv=True)
+        x = torch.randn(3, 24, N_FEATURES)
+        self.assertEqual(tuple(t.feature_discriminator(x).shape), (3, 24, 1))
+        self.assertGreater(count_parameters(t), count_parameters(TimeGAN(N_FEATURES, 16, 2)))
+
     def test_build_model(self):
         self.assertIsInstance(build_model("timegan", N_FEATURES), TimeGAN)
         self.assertIsInstance(build_model("baseline", N_FEATURES), RecurrentGAN)
@@ -264,6 +271,26 @@ class TestEndToEnd(unittest.TestCase):
             for fig in ("depth_heatmaps", "distributions", "volatility", "violations",
                         "autopsy"):
                 self.assertTrue(os.path.exists(f"{out}/figures/{fig}.png"), fig)
+
+
+    def test_train_with_experiment_options(self):
+        """All experiment flags run end to end and are recorded in the summary."""
+        flags = ["--feature-adv", "--w-diff", "10", "--lr-schedule", "cosine",
+                 "--return-transform", "quantile", "--w-moment", "10", "--w-sup", "10"]
+        with tempfile.TemporaryDirectory() as data, tempfile.TemporaryDirectory() as out:
+            make_fake_lob(data)
+            subprocess.run(
+                [sys.executable, "train.py", "--model", "timegan", "--data-dir", data,
+                 "--out-dir", out, "--ae-epochs", "1", "--sup-epochs", "1", "--epochs", "2",
+                 "--max-batches", "3", "--eval-every", "1", "--n-eval", "100",
+                 "--hidden", "16", "--layers", "2"] + flags,
+                cwd=HERE, check=True, capture_output=True)
+            summary = json.load(open(f"{out}/timegan_summary.json"))
+            self.assertTrue(summary["args"]["feature_adv"])
+            self.assertIn("reference", summary)
+            subprocess.run([sys.executable, "predict.py", "--data-dir", data, "--model-dir", out,
+                            "--models", "timegan", "--n-samples", "100"],
+                           cwd=HERE, check=True, capture_output=True)
 
 
 if __name__ == "__main__":
