@@ -1,5 +1,5 @@
 #!/bin/bash
-# Submit an experiment group to Slurm: every model x seed x setting, one job each.
+# Submit an experiment group to Slurm: every model x seed x setting.
 #   ./run_experiments.sh transform      # return-transform ablation (zscore/clip/quantile)
 #   ./run_experiments.sh step           # grid step size (0.5/1/5/10 s)
 #   ./run_experiments.sh loss           # TimeGAN loss weights, feature discriminator, cosine LR
@@ -7,17 +7,19 @@
 #   ./run_experiments.sh depth          # difference moment-matching loss for depth persistence
 # Results land in outputs/<group>/<setting>/<model>_s<seed>/ (gitignored).
 export PATH=/opt/slurm/bin:$PATH
-GROUP=${1:?usage: run_experiments.sh <transform|step>}
+GROUP=${1:?usage: run_experiments.sh <transform|step|loss|depth|ladder>}
 SEEDS=${SEEDS:-"0 1 2"}
 
+# Runs are packed: one Slurm job per (group, seed) runs all its settings and models at once
+# on a single GPU (slurm_pack.sh). DRYRUN=1 only writes the command files.
 submit() {  # submit <setting-name> <model> <seed> <extra train.py args...>
     local setting=$1 model=$2 seed=$3; shift 3
-    OUT_DIR=outputs/$GROUP/$setting/${model}_s$seed SEED=$seed \
-        sbatch --parsable --job-name=${GROUP:0:3}_${setting}_${model:0:2}$seed \
-        slurm_train.sh $model "$@"
+    echo "outputs/$GROUP/$setting/${model}_s$seed $model $seed $*" >> "$CMDFILE"
 }
 
 for seed in $SEEDS; do
+  CMDFILE=outputs/$GROUP/cmds_s$seed.txt
+  mkdir -p outputs/$GROUP && : > "$CMDFILE"
   for model in timegan baseline; do
     # loss/depth settings only change TimeGAN training, so the baseline is skipped
     [[ $model == baseline && ( $GROUP == loss || $GROUP == depth ) ]] && continue
@@ -41,4 +43,7 @@ for seed in $SEEDS; do
       *) echo "unknown group $GROUP"; exit 1 ;;
     esac
   done
+  if [ -z "$DRYRUN" ]; then
+      sbatch --parsable --job-name=${GROUP:0:4}_s$seed slurm_pack.sh "$CMDFILE"
+  fi
 done
