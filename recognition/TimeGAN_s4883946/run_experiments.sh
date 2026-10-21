@@ -4,10 +4,11 @@
 #   ./run_experiments.sh step           # grid step size (0.5/1/5/10 s)
 #   ./run_experiments.sh loss           # TimeGAN loss weights, feature discriminator, cosine LR
 #   ./run_experiments.sh ladder         # price ladder as distances vs gaps between levels
+#   ./run_experiments.sh combined       # best changes from the other groups, together
 #   ./run_experiments.sh depth          # difference moment-matching loss for depth persistence
 # Results land in outputs/<group>/<setting>/<model>_s<seed>/ (gitignored).
 export PATH=/opt/slurm/bin:$PATH
-GROUP=${1:?usage: run_experiments.sh <transform|step|loss|depth|ladder>}
+GROUP=${1:?usage: run_experiments.sh <transform|step|loss|depth|ladder|combined>}
 SEEDS=${SEEDS:-"0 1 2"}
 
 # Runs are packed: one Slurm job per (group, seed) runs all its settings and models at once
@@ -40,6 +41,15 @@ for seed in $SEEDS; do
         submit diff100  $model $seed --w-diff 100 ;;
       ladder)
         for l in levels increments; do submit $l $model $seed --ladder $l; done ;;
+      combined)
+        BEST="--return-transform quantile --ladder increments"
+        submit q_inc $model $seed $BEST
+        if [[ $model == timegan ]]; then   # TimeGAN-only options
+            ALL="$BEST --feature-adv --w-diff 10"
+            submit all       $model $seed $ALL
+            submit all_step5 $model $seed $ALL --step 5
+            submit all_step05 $model $seed $ALL --step 0.5
+        fi ;;
       *) echo "unknown group $GROUP"; exit 1 ;;
     esac
   done
