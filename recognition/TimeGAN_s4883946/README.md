@@ -315,3 +315,19 @@ These five cases come from the final TimeGAN (quantile transform, ladder increme
 - **KL depends on binning and is noisy in the sparse tails.** The binning rule is fixed and stated, but other rules would give other values. The real-data reference rows are the right scale for judging them.
 - **SSIM** compares noisy surfaces and tops out at about 0.3 even for real data under the nearest-window definition, so the 0.6 target is not reachable with that definition.
 - **Quantile transform.** Part of its return-KL gain comes from the transform's decoding, which sends a band of normal scores to exactly zero, and not only from what the model learned.
+
+## Artificial Intelligence Usage Disclosure
+
+**Tools used.** Claude Code (Anthropic's AI coding assistant), running a Claude Sonnet model, used as an interactive assistant inside this repository and on the Rangpur cluster. No other AI tool was used.
+
+**What the AI assisted with.** It wrote most of the first drafts of the code and documentation, working from my direction: the data pipeline (`dataset.py`), the TimeGAN and baseline networks (`modules.py`), the training and prediction scripts (`train.py`, `predict.py`), the evaluation metrics (`metrics.py`), the unit and end-to-end tests (`test_pipeline.py`), the Slurm and experiment scripts, the analysis scripts, and drafts of the README text including the tables built from the experiment output. It also suggested which experiments to run (the return-transform, ladder, loss, depth and step-size ablations) and helped debug problems such as a cluster memory request that was rejected and syntax that was not valid on the cluster's Python version. I chose the project, the dataset, the model and the difficulty band, and I decided which results to run and report.
+
+**How the AI output was checked.** Nothing was accepted on trust:
+
+- **Tests.** A test suite (`test_pipeline.py`, 27 tests plus later additions) checks the resampling, the feature round trip back to real prices and volumes, the chronological split and that normalisation uses training data only, the model shapes, that `modules.py` imports only PyTorch, the metrics on deliberately broken books, and a short end-to-end train and predict run. It runs on a small fake order book, so it does not depend on the real data.
+- **Real-data references.** Every metric is reported next to the same metric computed between real training windows and real test windows, so a number is never judged on its own. This is how two targets in the assignment (SSIM above 0.6, spread KL of at most 0.1) were found to be out of reach even for real data.
+- **Bugs caught by checking.** Several mistakes in AI-written code or text were found and corrected: an SSIM reference run in which windows were compared with themselves (score 1.0), a test that assumed the wrong thing about the quantile transform, README sentences that lost words when a shell command ate backticks, and wrong parameter and training-time ratios in the README.
+- **Repeat runs.** Results are means over three seeds, and differences smaller than the seed-to-seed spread are not treated as findings.
+- **Reading outputs.** The generated figures and tables were inspected before conclusions were written from them, and claims that the evidence does not support (such as the cause of the spread error) are labelled as hypotheses or tested directly.
+
+**Responsibility.** I am responsible for every line of code, equation and claim in this submission. The test split was also used to compare settings in the ablations (see Limitations), which is my decision and is stated openly.
