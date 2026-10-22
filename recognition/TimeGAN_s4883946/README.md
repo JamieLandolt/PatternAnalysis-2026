@@ -4,7 +4,74 @@ Project 2.7 (Time-Series Generation: Limit Order Book and Market Simulation), Ha
 
 Author: Jamie Landolt (s4883946)
 
-Work in progress: the sections below are filled in as the project develops.
+## Overview
+
+**Problem.** Evaluating trading algorithms and risk systems needs realistic market simulations, but real limit order book (LOB) data is expensive. A generative model can produce synthetic order book sequences, but an order book is not an ordinary time series: it must obey hard rules. The best bid must be below the best ask (a *crossed book* would be a free arbitrage), prices must be ordered across the 10 depth levels, volumes cannot be negative, and the sequence should show real stylised facts such as volatility clustering and heavy-tailed returns. This project trains a **TimeGAN** on one day of AMZN Level-10 data from LOBSTER and audits whether the generated 24-second order book windows respect those rules and match the real distributions, compared with a plain recurrent GAN baseline.
+
+**How it works.** Each real window is a 24-step sequence (one step per second) of 41 features: the mid-price log-return, the distance of each of 10 ask and 10 bid levels from the mid-price, and the volume at each of those 20 levels. TimeGAN (Yoon, Jarrett and van der Schaar, NeurIPS 2019) learns in a *latent space*: an embedder and recovery network (an autoencoder) map windows to and from latent sequences, a generator turns random noise into latent sequences, a supervisor learns the step-to-step dynamics of the latent sequences, and a discriminator tells real latents from generated ones. It is trained in three phases (autoencoder, supervisor, then everything jointly), using reconstruction, supervised, adversarial and mean/std-matching losses. The baseline is a GRU generator and discriminator that work directly on the features with only the adversarial loss. Generated windows are decoded back to prices and volumes and audited for crossed books, invalid price ladders and negative depth, then compared with real held-out windows using KL divergence, SSIM of depth heatmaps and volatility clustering.
+
+```
+real window x --Embedder--> h --Recovery--> x~          (reconstruction loss)
+                            |
+                            +--Supervisor--> next-step prediction of h  (supervised loss)
+
+noise z --Generator--> e^ --Supervisor--> h^ --Recovery--> x^   (synthetic window)
+
+Discriminator: real latents h   vs   generated latents h^, e^    (adversarial loss)
+```
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `modules.py` | TimeGAN networks and the recurrent-GAN baseline (PyTorch only) |
+| `dataset.py` | Loading, 1-second resampling, features, return transforms, chronological split, windows, data loaders |
+| `train.py` | Training, validation, test and checkpointing for both models; loss curves |
+| `predict.py` | Loads trained weights, samples windows, compares with real data, saves figures |
+| `metrics.py` | Microstructure audit, KL divergence, volatility clustering, depth-heatmap SSIM |
+| `test_pipeline.py` | Unit and end-to-end tests (use a small fake order book, no real data needed) |
+| `audit_data.py`, `plot_returns.py` | Real-data audit and return-distribution figure |
+| `slurm_train.sh`, `slurm_pack.sh`, `run_experiments.sh`, `summarise_runs.py` | Running and summarising experiments on the Rangpur cluster |
+
+## Dependencies and reproducibility
+
+Results were produced on the Rangpur cluster (NVIDIA A100 GPUs) with these exact versions:
+
+| Package | Version |
+|---|---|
+| Python | 3.11.15 |
+| PyTorch | 2.13.0+cu130 |
+| NumPy | 2.4.6 |
+| SciPy | 1.17.1 |
+| Matplotlib | 3.11.1 |
+| scikit-image | 0.26.0 |
+
+`modules.py` depends only on PyTorch. The LOBSTER sample files are **not** committed (assessment rule); place the two CSV files and the LOBSTER readme in one directory and pass it with `--data-dir`. Every run takes `--seed`; the reported numbers are the mean and standard deviation over seeds 0, 1 and 2. GPU training is not bit-for-bit deterministic, so single runs can differ slightly.
+
+## Usage
+
+```bash
+# unit and end-to-end tests (no real data needed)
+python -m unittest test_pipeline -v
+
+# audit of the real data, and the return-distribution figure
+python audit_data.py <data_dir>
+python plot_returns.py <data_dir> figures/return_distribution.png
+
+# train (outputs/<model>.pt, <model>_summary.json, <model>_training.png)
+python train.py --model timegan  --data-dir <data_dir> --out-dir outputs
+python train.py --model baseline --data-dir <data_dir> --out-dir outputs
+# optional TimeGAN changes studied below:
+#   --return-transform quantile --ladder increments --feature-adv --w-diff 10 --step 1
+
+# sample from the trained models, print the comparison table and save figures
+python predict.py --data-dir <data_dir> --model-dir outputs
+
+# on Rangpur (Slurm): one run, or a whole experiment group
+sbatch --job-name=lob_timegan slurm_train.sh timegan
+./run_experiments.sh transform        # also: step, loss, depth, ladder, combined
+python summarise_runs.py outputs/transform
+```
 
 ## Feasibility Review
 
