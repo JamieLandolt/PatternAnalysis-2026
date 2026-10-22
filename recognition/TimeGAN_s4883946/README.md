@@ -129,3 +129,33 @@ Implications: (a) the real data is clean, so any invariant violation in syntheti
 **Budget:** one GPU on the `comp3710` partition via Slurm. A full TimeGAN run takes about 9 minutes, so there is room for repeated runs and several seeds.
 **Next experiment:** the normalisation ablation above, measured on the same chronological validation and test splits, plus repeat runs with different seeds so differences between models are not single-run noise.
 **Fallback:** if TimeGAN will not train stably, report the baseline plus a TimeGAN with a simplified architecture and shorter windows, and document the failure modes honestly, since the project question is whether the model enforces the invariants and not only whether it succeeds.
+
+## Data and preprocessing
+
+**Data.** LOBSTER sample file for AMZN on 2012-06-21, 09:30 to 16:00, 10 price levels: 269,748 order book events (Huang and Polak, 2011). Prices are stored in units of 1/10,000 dollar, and the minimum price step (tick) is $0.01.
+
+**Preprocessing** (all in `dataset.py`):
+
+1. **Resample onto a 1-second grid.** Events arrive at irregular times and about 90% of them leave the mid-price unchanged. For each second, the book is the state after the last event at or before that time. This gives 23,400 evenly spaced snapshots; 70% of 1-second mid-returns are still exactly zero (event level: 90%), and the kurtosis falls from about 203 to 38.5.
+2. **Features (41 per step).** The mid-price log-return `ln(P_t / P_{t-1})`; the distance of each of the 10 ask and 10 bid levels from the mid-price in ticks, as `log1p(distance)`; and `log1p(volume)` for each of the 20 levels (volumes are very skewed: median 100, maximum 5,700 shares). Expressing prices as distances from the mid-price turns the market rules into sign and ordering conditions that can be audited, instead of building them into the representation.
+3. **Optional return transform** (`--return-transform`): plain z-scoring, winsorising at the 0.5th and 99.5th percentiles (`clip`), or a quantile transform (`quantile`) that maps returns to normal scores through the training-set empirical CDF. In the quantile transform all exact zeros map to one value and decoding sends a whole band of normal scores back to exactly 0, so the generator does not have to output exact zeros.
+4. **Optional ladder representation** (`--ladder`): either the distance of every level from the mid-price (`levels`), or the distance of level 1 followed by the gap between successive levels (`increments`). Real gaps are always at least one tick, so with `increments` the model only has to produce positive gaps for the ladder to stay ordered. Nothing is enforced: a negative decoded gap is counted as a violation.
+5. **Chronological split, then normalisation.** Each feature is z-scored with the mean and standard deviation of the **training split only**.
+6. **Windows.** Overlapping 24-step windows (stride 1), built inside each split.
+
+**Splits and why.** The day is split in time order, with no shuffling: the first 60% for training (09:30 to 13:24), the next 20% for validation (13:24 to 14:42) and the last 20% for testing (14:42 to 16:00). Models only see earlier data than they are validated and tested on, which prevents look-ahead bias. Windows never cross a split boundary, and normalisation statistics and the quantile transform are fitted on the training split only, so nothing leaks. This gives 14,017 training, 4,657 validation and 4,657 test windows. Model selection (the best checkpoint) uses the validation split; the test split is only used for the reported numbers. Because the sample is a single day, the test period is a different part of the same day and not a different day, so results should not be read as evidence about other days or market conditions.
+
+![Real 1-second mid-return distribution: spike at zero and fat tails](figures/return_distribution.png)
+
+*Real 1-second mid-returns have a sharp spike at zero (70% exact zeros) and far heavier tails than a Gaussian of the same standard deviation (kurtosis 38.5 against 3).*
+
+## Evaluation
+
+All metrics compare generated windows with **real test windows** (`metrics.py`).
+
+- **Microstructure audit** (per snapshot): *crossed* (best ask not above best bid, i.e. spread <= 0), *ladder* (ask prices not rising, or bid prices not falling, with depth level), *negative depth*.
+- **KL divergence** between real and generated spread, and between real and generated 1-step mid-returns. Binning rule (fixed so results are comparable): 50 equal-width bins between the 0.5th and 99.5th percentile of the real data plus two open-ended outer bins, with a small constant added to each bin before normalising.
+- **Volatility clustering:** autocorrelation of absolute returns inside windows at lags 1 and 5.
+- **SSIM of depth heatmaps.** The heatmap of a window is a 20 x 24 image: rows are the bid levels 10 to 1 followed by the ask levels 1 to 10, columns are the 24 time steps, and the colour is `log(1 + volume)`. Each generated heatmap is compared with its nearest real heatmap (smallest L2 distance), and the SSIM is averaged over 300 generated windows. This is a strict measure, so each table also shows the **real-data reference**: the same score for real training windows against real test windows, which is the highest a perfect generator could reasonably reach.
+
+**Real-data reference.** The test period differs from the training period (the average spread is $0.14 in training and $0.11 in the test period), so even real data from the training period does not match the test period perfectly: at the 1-second step its KL is about 0.22 for spread and 0.19 for returns, and its SSIM is 0.30. Targets taken from the assignment (KL <= 0.1, SSIM > 0.6) should be read with these numbers in mind.
