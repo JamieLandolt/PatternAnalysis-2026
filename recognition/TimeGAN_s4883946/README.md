@@ -31,6 +31,7 @@ Discriminator: real latents h   vs   generated latents h^, e^    (adversarial lo
 | `metrics.py` | Microstructure audit, KL divergence, volatility clustering, depth-heatmap SSIM |
 | `test_pipeline.py` | Unit and end-to-end tests (use a small fake order book, no real data needed) |
 | `audit_data.py`, `plot_returns.py` | Real-data audit and return-distribution figure |
+| `analyse_failures.py` | Failure analysis: tick grid, ladder violation size, negative depth |
 | `slurm_train.sh`, `slurm_pack.sh`, `run_experiments.sh`, `summarise_runs.py` | Running and summarising experiments on the Rangpur cluster |
 
 ## Dependencies and reproducibility
@@ -298,14 +299,28 @@ These five cases come from the final TimeGAN (quantile transform, ladder increme
 
 ![Volatility clustering](figures/volatility.png)
 
+## Enforced-rules variant
+
+The failure cases above are all rule violations that a simple decoder can repair. `snap_to_rules` in `metrics.py` projects each generated window onto the market rules: the spread becomes a whole number of ticks and at least one tick (best ask and bid are placed symmetrically about the mid-price, as in the real data), every gap between successive price levels becomes a whole number of ticks and at least one, and volumes become whole numbers and at least 1. Returns are untouched, and real windows pass through unchanged (tested). `predict.py` reports this variant next to the raw output. It **enforces** the rules instead of showing that the model learned them, so it is kept separate from the main results. Same checkpoints as the combined configuration (quantile transform, ladder increments, 1 s step; TimeGAN with the feature discriminator and difference loss), mean ± standard deviation over seeds 0 to 2:
+
+| Output | Model | Ladder violations | Negative depth | KL spread | KL return | SSIM |
+|---|---|---|---|---|---|---|
+| Raw | TimeGAN | 0.076 ± 0.029 | 0.005 ± 0.004 | 1.258 ± 0.094 | 0.163 ± 0.043 | 0.267 ± 0.026 |
+| Raw | Baseline GAN | 0.088 ± 0.005 | 0.007 ± 0.001 | 1.317 ± 0.166 | 0.136 ± 0.048 | 0.242 ± 0.038 |
+| Rules enforced | TimeGAN | 0.000 | 0.000 | **0.308 ± 0.101** | 0.163 ± 0.043 | 0.267 ± 0.026 |
+| Rules enforced | Baseline GAN | 0.000 | 0.000 | **0.330 ± 0.198** | 0.136 ± 0.048 | 0.241 ± 0.038 |
+| *Real (train vs test)* | | 0.000 | 0.000 | 0.220 | 0.194 | 0.284 |
+
+Enforcing the rules removes every ladder and depth violation by construction and cuts the spread KL by about four times, to within about 0.1 of the real-data reference (0.22), but it is still above the 0.1 target; the seed-to-seed spread is large (TimeGAN 0.25, 0.45, 0.22). Return KL, SSIM and volatility clustering do not change, because the decoder does not touch returns and only rounds the volumes, so the remaining gaps (depth persistence, the spread's shape) are properties of what the models learned. TimeGAN's return KL here (0.163) is the 1-second value; the two settings under 0.1 were at 0.5 s and 5 s.
+
 ## Recommendation to the project manager
 
 **Not yet reliable for backtesting an execution strategy, but promising as a base.**
 
 - **What works.** No run ever produced a crossed book, so the central arbitrage risk did not appear. With the quantile transform, return distributions match the real ones closely (return KL 0.069 at 5 s and 0.084 at 0.5 s, both under the 0.1 target), and volatility clustering is near real at short lags.
-- **What blocks use.** Generated prices are not on the tick grid (80% of spreads), about 8% of snapshots have a ladder that is not strictly ordered, 0.5% to 0.7% contain negative volumes, and depth surfaces lack the persistence that real queues have. Persistence matters for execution tests, because order fill times depend on how long resting volume stays. Spread KL is about 1.3 raw and about 0.3 after tick rounding, against 0.22 for real data.
+- **What blocks use.** Generated prices are not on the tick grid (80% of spreads), about 8% of snapshots have a ladder that is not strictly ordered, 0.5% to 0.7% contain negative volumes, and depth surfaces lack the persistence that real queues have. Persistence matters for execution tests, because order fill times depend on how long resting volume stays. Spread KL is about 1.3 raw and about 0.3 with the enforced-rules decoder, against 0.22 for real data and a target of 0.1.
 - **Does TimeGAN justify its cost?** On these measures, mostly not at the 1-second step. With the same representation fixes, the plain recurrent GAN is close behind (return KL 0.142 against 0.128; invalid ladders 8.9% against 7.9%), while TimeGAN needs about 3 times the training time (669 s against 206 s) and 1.8 times the parameters. TimeGAN's clearer advantage appeared at coarse steps in the step-size test, where the plain GAN broke down at 5 s and 10 s (return KL above 2.9) while TimeGAN did not; the plain GAN with the quantile and ladder changes was not run at those steps, so that comparison is not like for like.
-- **Next steps, in order.** (1) Snap prices to ticks and enforce a gap of at least one tick, and clamp volumes at zero, and report these as enforced rules separately from what the model learns. (2) Model the spread directly and generate volume changes instead of levels. (3) Obtain more than one trading day so results can be tested across days.
+- **Next steps, in order.** (1) Use the enforced-rules decoder for any downstream use now (it removes the violations and brings the spread KL to about 0.3), and in parallel make the model itself produce on-grid prices and valid gaps, for example by predicting whole tick counts, since the decoder only repairs its output. (2) Model the spread directly and generate volume changes instead of levels, to address the depth persistence the decoder cannot fix. (3) Obtain more than one trading day so results can be tested across days.
 
 ## Limitations
 
@@ -324,7 +339,7 @@ These five cases come from the final TimeGAN (quantile transform, ladder increme
 
 **How the AI output was checked.** Nothing was accepted on trust:
 
-- **Tests.** A test suite (`test_pipeline.py`, 27 tests plus later additions) checks the resampling, the feature round trip back to real prices and volumes, the chronological split and that normalisation uses training data only, the model shapes, that `modules.py` imports only PyTorch, the metrics on deliberately broken books, and a short end-to-end train and predict run. It runs on a small fake order book, so it does not depend on the real data.
+- **Tests.** A test suite (`test_pipeline.py`, 30 tests) checks the resampling, the feature round trip back to real prices and volumes, the chronological split and that normalisation uses training data only, the model shapes, that `modules.py` imports only PyTorch, the metrics on deliberately broken books, and a short end-to-end train and predict run. It runs on a small fake order book, so it does not depend on the real data.
 - **Real-data references.** Every metric is reported next to the same metric computed between real training windows and real test windows, so a number is never judged on its own. This is how two targets in the assignment (SSIM above 0.6, spread KL of at most 0.1) were found to be out of reach even for real data.
 - **Bugs caught by checking.** Several mistakes in AI-written code or text were found and corrected: an SSIM reference run in which windows were compared with themselves (score 1.0), a test that assumed the wrong thing about the quantile transform, README sentences that lost words when a shell command ate backticks, and wrong parameter and training-time ratios in the README.
 - **Repeat runs.** Results are means over three seeds, and differences smaller than the seed-to-seed spread are not treated as findings.
