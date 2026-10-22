@@ -260,3 +260,58 @@ The changes that helped were combined: the quantile return transform and the lad
 - **Step size.** With everything combined, the return KL is **0.084 ± 0.016 at 0.5 s** and **0.069 ± 0.006 at 5 s**, both under the 0.1 target; the 5 s value is close to its real reference (0.057). At 5 s invalid ladders fall to 3.8%. At 0.5 s SSIM reaches 0.378, almost the real ceiling (0.381).
 - **Spread KL** is still 1.3 to 1.5 in every combined setting; the next section shows that most of it comes from the tick grid.
 - **Targets (assignment values).** Return KL <= 0.1: met at 0.5 s and 5 s, not at 1 s. Spread KL <= 0.1: not met (about 0.3 after rounding to whole ticks, real reference 0.22). SSIM > 0.6: not met; the best is 0.378, and real windows reach at most 0.381 at that step.
+
+## Resource profile
+
+| Model and setting | Parameters | Training time | Peak GPU memory | Sampling 1,000 windows |
+|---|---|---|---|---|
+| TimeGAN, control (one run alone on an A100) | 479,914 | 549 s | 573 MB | 2 ms |
+| Baseline GAN, control (one run alone) | 263,338 | 125 s | 535 MB | 1 ms |
+| TimeGAN, all options, 1 s (8 runs sharing one GPU) | 670,123 | 806 s | 623 MB | 2 ms |
+| TimeGAN, all options, 0.5 s (shared) | 670,123 | 1,463 s | 646 MB | 2 ms |
+| TimeGAN, all options, 5 s (shared) | 670,123 | 209 s | 646 MB | 2 ms |
+| Baseline GAN, quantile + increments, 1 s (shared) | 263,338 | 206 s | 535 MB | 1 ms |
+
+Peak memory is the maximum PyTorch allocation on one NVIDIA A100. Times marked *shared* come from runs packed eight to a GPU, so they are longer than a run on its own (the control TimeGAN took 549 s alone and 657 s to 703 s shared). All models fit comfortably in under 1 GB, so the resource limit in the feasibility review (2 GB, 30 minutes per model) is met. The TimeGAN with all options needs about 3 to 4 times the training time and 1.8 times the parameters of the baseline.
+
+Training curves for the final TimeGAN and its matched baseline (seed 0): ![TimeGAN training](figures/timegan_training.png) ![Baseline training](figures/baseline_training.png)
+
+## Failure case autopsy
+
+These five cases come from the final TimeGAN (quantile transform, ladder increments, feature discriminator, difference loss, 1 s step) and its matched baseline, using `predict.py` and `analyse_failures.py`. Figures are from seed 0; percentages quoted as means are over seeds 0, 1 and 2.
+
+**Case 1: generated spreads fall between price ticks.** Real prices sit on a $0.01 grid, so real spreads are whole ticks. About 80% of generated spreads are more than 0.1 tick off the grid, for both models (figure below). Rounding the generated spreads to whole ticks lowers the spread KL from 1.26 to **0.31** for TimeGAN (seeds: 1.20, 1.39, 1.18 to 0.25, 0.45, 0.22) and from 1.32 to 0.33 for the baseline, against a real-data reference of 0.22. *Trigger:* prices are generated as continuous log-distances and nothing pushes them onto integer ticks. Most of the stuck spread KL is this rule violation and not a failure to learn the spread's typical size. Rounding at decoding is an enforced market rule, so it is reported separately and not used in the main tables.
+
+![Spread in ticks: real versus generated](figures/spread_ticks.png)
+
+**Case 2: invalid price ladders are small dips near the touch.** 7.6% of TimeGAN snapshots (seeds: 11.3%, 4.2%, 7.3%) and 8.8% of baseline snapshots have a ladder that is not strictly ordered. In every run, 100% of these dip by at most one tick, and 25% to 45% (TimeGAN) involve levels 1 to 3. 95% of seed-0 TimeGAN snapshots have some gap between neighbouring levels below one tick (real data: 0%). *Trigger:* the same off-grid noise as Case 1. A real gap is at least one tick, so a fraction of a tick of noise flips an ordering when a gap is exactly one tick. Crossed books never occurred in any run, because generated spreads are always several ticks wide (none below one tick). The worst snapshots are shown in the figure below.
+
+![Worst generated ladders](figures/autopsy.png)
+
+**Case 3: depth surfaces lack the real hold-then-jump structure.** In real depth heatmaps a volume stays at one level for several seconds and then jumps, producing flat blocks; generated surfaces change at almost every step, so they look like fine noise (figure below). The difference loss raised SSIM from 0.238 to 0.287 (real ceiling 0.298 at 1 s), but the picture is still noisy. *Trigger:* volumes are generated as independent continuous log-values at each step. SSIM is a weak detector of this: the noisy generated surfaces still score close to the real ceiling (0.265 against 0.298), so the heatmaps themselves are more informative than the score.
+
+![Real versus generated depth surfaces](figures/depth_heatmaps.png)
+
+**Case 4: a small share of snapshots contain negative volumes.** 0.54% of TimeGAN snapshots (seeds: 1.03%, 0.16%, 0.43%) and 0.69% of baseline snapshots have at least one volume below zero (about 0.04% to 0.1% of all level volumes). *Trigger:* the output layer is linear and unbounded, and volumes are decoded with `expm1`, so a log-volume below zero gives a negative count. Clamping at decoding would remove it.
+
+**Case 5: volatility clustering is easy to get wrong in both directions.** With plain z-scored returns TimeGAN's clustering is far too strong (autocorrelation of absolute returns 0.38 at lag 1 and 0.28 at lag 5, against 0.14 and 0.08 in the real test period). With the quantile transform it falls close at lag 1 (0.115) but is too weak at lag 5 (0.026), and the baseline loses it altogether (-0.018 at lag 1). *Trigger:* the return transform changes how much of each window's variance is carried by a few extreme returns, and the generator has no loss that targets how volatility persists over time. The volatility figure is below.
+
+![Volatility clustering](figures/volatility.png)
+
+## Recommendation to the project manager
+
+**Not yet reliable for backtesting an execution strategy, but promising as a base.**
+
+- **What works.** No run ever produced a crossed book, so the central arbitrage risk did not appear. With the quantile transform, return distributions match the real ones closely (return KL 0.069 at 5 s and 0.084 at 0.5 s, both under the 0.1 target), and volatility clustering is near real at short lags.
+- **What blocks use.** Generated prices are not on the tick grid (80% of spreads), about 8% of snapshots have a ladder that is not strictly ordered, 0.5% to 0.7% contain negative volumes, and depth surfaces lack the persistence that real queues have. Persistence matters for execution tests, because order fill times depend on how long resting volume stays. Spread KL is about 1.3 raw and about 0.3 after tick rounding, against 0.22 for real data.
+- **Does TimeGAN justify its cost?** On these measures, mostly not at the 1-second step. With the same representation fixes, the plain recurrent GAN is close behind (return KL 0.142 against 0.128; invalid ladders 8.9% against 7.9%), while TimeGAN needs about 3 to 4 times the training time and 1.8 times the parameters. TimeGAN's clearer advantage appeared at coarse steps in the step-size test, where the plain GAN broke down at 5 s and 10 s (return KL above 2.9) while TimeGAN did not; the plain GAN with the quantile and ladder changes was not run at those steps, so that comparison is not like for like.
+- **Next steps, in order.** (1) Snap prices to ticks and enforce a gap of at least one tick, and clamp volumes at zero, and report these as enforced rules separately from what the model learns. (2) Model the spread directly and generate volume changes instead of levels. (3) Obtain more than one trading day so results can be tested across days.
+
+## Limitations
+
+- **One trading day.** The test period is the last 78 minutes of the same day, so nothing here shows how the models behave on other days or market conditions.
+- **The test split was used to compare settings.** Each run's checkpoint was chosen on the validation split, but the ablation settings (and the final combined configuration) were chosen by looking at test-split results. The final numbers are therefore somewhat optimistic, and there is no untouched test set.
+- **Three seeds.** Small differences between settings are within seed-to-seed spread and should not be over-read.
+- **KL depends on binning and is noisy in the sparse tails.** The binning rule is fixed and stated, but other rules would give other values. The real-data reference rows are the right scale for judging them.
+- **SSIM** compares noisy surfaces and tops out at about 0.3 even for real data under the nearest-window definition, so the 0.6 target is not reachable with that definition.
+- **Quantile transform.** Part of its return-KL gain comes from the transform's decoding, which sends a band of normal scores to exactly zero, and not only from what the model learned.
