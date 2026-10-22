@@ -48,10 +48,11 @@ def snap_to_rules(raw, ladder="levels"):
     learned.
     """
     out = np.array(raw, dtype=float, copy=True)
-    dist = {sl: decode_distances(raw[..., sl], ladder) for sl in (ASK_DIST, BID_DIST)}
-    spread = np.maximum(np.round(dist[ASK_DIST][..., 0] + dist[BID_DIST][..., 0]), 1.0)
+    # (slices are not hashable before Python 3.12, so keep them in a list, not a dict)
+    dist = [(sl, decode_distances(raw[..., sl], ladder)) for sl in (ASK_DIST, BID_DIST)]
+    spread = np.maximum(np.round(dist[0][1][..., 0] + dist[1][1][..., 0]), 1.0)
     first = (spread / 2)[..., None]
-    for sl, d in dist.items():
+    for sl, d in dist:
         gaps = np.maximum(np.round(np.diff(d, axis=-1)), 1.0)
         if ladder == "increments":
             ticks = np.concatenate([first, gaps], axis=-1)
