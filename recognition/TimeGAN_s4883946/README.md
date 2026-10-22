@@ -238,3 +238,25 @@ Larger steps help TimeGAN: the return KL falls from 1.279 (1 s) to 0.409 (5 s) a
 ### What did not move: the spread
 
 Across every setting the spread KL stays between 1.2 and 1.6, against a real-data reference of 0.22. The lowest values (1.231 with no mean/std loss, and 1.237 for the baseline) come from models whose ladders are mostly invalid. The spread is the sum of the best ask distance and the best bid distance, which are generated separately, so small errors in each add up. Modelling the spread (and the mid-price offset) directly is an untested idea for future work.
+
+### 6. Combined configuration
+
+The changes that helped were combined: the quantile return transform and the ladder-increments representation for **both** models, and, for TimeGAN only, the feature discriminator and the difference loss (weight 10), at three step sizes. TimeGAN's extra options have no counterpart in the baseline, so the two are not a like-for-like comparison once those are added; the `quantile + ladder increments, 1 s` rows are the matched comparison.
+
+| Setting | Model | Ladder violations | KL spread | KL return | SSIM | ACF lag 1 | ACF lag 5 |
+|---|---|---|---|---|---|---|---|
+| quantile + ladder increments, 1 s | TimeGAN | 0.079 ± 0.019 | 1.342 ± 0.062 | 0.128 ± 0.010 | 0.135 ± 0.005 | 0.079 ± 0.049 | 0.012 ± 0.017 |
+| quantile + ladder increments, 1 s | Baseline GAN | 0.089 ± 0.004 | 1.325 ± 0.171 | 0.142 ± 0.037 | 0.239 ± 0.041 | -0.018 ± 0.093 | 0.059 ± 0.044 |
+| quantile + ladder increments, 1 s | *real (train vs test)* | 0.000 | 0.220 | 0.190 | 0.298 | 0.155 | 0.044 |
+| + feature discriminator + difference loss, 1 s | TimeGAN | 0.075 ± 0.028 | 1.306 ± 0.079 | 0.167 ± 0.035 | 0.265 ± 0.019 | 0.115 ± 0.017 | 0.026 ± 0.012 |
+| + feature discriminator + difference loss, 1 s | *real (train vs test)* | 0.000 | 0.220 | 0.190 | 0.298 | 0.155 | 0.044 |
+| same, 0.5 s step | TimeGAN | 0.116 ± 0.013 | 1.498 ± 0.180 | 0.084 ± 0.016 | 0.378 ± 0.018 | 0.090 ± 0.022 | 0.029 ± 0.019 |
+| same, 0.5 s step | *real (train vs test)* | 0.000 | 0.221 | 0.013 | 0.381 | 0.106 | 0.035 |
+| same, 5 s step | TimeGAN | 0.038 ± 0.006 | 1.354 ± 0.059 | 0.069 ± 0.006 | 0.166 ± 0.019 | 0.053 ± 0.071 | 0.059 ± 0.015 |
+| same, 5 s step | *real (train vs test)* | 0.000 | 0.225 | 0.057 | 0.205 | 0.140 | 0.050 |
+
+- **Matched comparison (quantile + ladder increments, 1 s).** The baseline almost catches TimeGAN: return KL 0.142 ± 0.037 against 0.128 ± 0.010, and invalid ladders 8.9% against 7.9%. These two representation changes explain most of the gain over the controls, and TimeGAN's own losses add little on these metrics.
+- **TimeGAN with all options at 1 s.** Invalid ladders 7.5%, return KL 0.167 ± 0.035 (worse than without the extra options, 0.128), SSIM 0.265 (better than 0.135 without them), and volatility clustering at lag 1 close to the real test period (0.115 against 0.139) but too weak at lag 5 (0.026 against 0.080).
+- **Step size.** With everything combined, the return KL is **0.084 ± 0.016 at 0.5 s** and **0.069 ± 0.006 at 5 s**, both under the 0.1 target; the 5 s value is close to its real reference (0.057). At 5 s invalid ladders fall to 3.8%. At 0.5 s SSIM reaches 0.378, almost the real ceiling (0.381).
+- **Spread KL** is still 1.3 to 1.5 in every combined setting; the next section shows that most of it comes from the tick grid.
+- **Targets (assignment values).** Return KL <= 0.1: met at 0.5 s and 5 s, not at 1 s. Spread KL <= 0.1: not met (about 0.3 after rounding to whole ticks, real reference 0.22). SSIM > 0.6: not met; the best is 0.378, and real windows reach at most 0.381 at that step.
