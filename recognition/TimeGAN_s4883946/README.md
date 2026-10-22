@@ -162,7 +162,7 @@ All metrics compare generated windows with **real test windows** (`metrics.py`).
 
 ## Experiments and results
 
-**Protocol.** Every setting was trained with three seeds (0, 1, 2) for both models where it applies, with the same epochs as the control (TimeGAN: 30 autoencoder, 30 supervised and 100 joint epochs; baseline: 100 epochs), and the checkpoint with the best *validation* KL (spread plus return) was scored once on the *test* split. Tables show mean ± standard deviation over the three seeds. One change is made at a time against the control (z-score returns,  ladder, 1-second step, default loss weights). Crossed books were 0 in every run of every model, so that column is omitted. The *real (train vs test)* row is the reference from the Evaluation section; its ACF values are for real training windows, and the test period itself has 0.14 (lag 1) and 0.08 (lag 5). The differences discussed below are larger than the seed-to-seed spread unless stated otherwise; with only three seeds, small gaps should be treated as noise.
+**Protocol.** Every setting was trained with three seeds (0, 1, 2) for both models where it applies, with the same epochs as the control (TimeGAN: 30 autoencoder, 30 supervised and 100 joint epochs; baseline: 100 epochs), and the checkpoint with the best *validation* KL (spread plus return) was scored once on the *test* split. Tables show mean ± standard deviation over the three seeds. One change is made at a time against the control (z-score returns, `levels` ladder, 1-second step, default loss weights). Crossed books were 0 in every run of every model, so that column is omitted. The *real (train vs test)* row is the reference from the Evaluation section; its ACF values are for real training windows, and the test period itself has 0.14 (lag 1) and 0.08 (lag 5). The differences discussed below are larger than the seed-to-seed spread unless stated otherwise; with only three seeds, small gaps should be treated as noise.
 
 ### 1. Return transform
 
@@ -176,7 +176,7 @@ All metrics compare generated windows with **real test windows** (`metrics.py`).
 | quantile | TimeGAN | 0.303 ± 0.070 | 1.474 ± 0.034 | 0.117 ± 0.009 | 0.208 ± 0.036 | 0.097 ± 0.017 | 0.078 ± 0.012 |
 | quantile | Baseline GAN | 0.985 ± 0.015 | 1.402 ± 0.262 | 0.216 ± 0.053 | 0.350 ± 0.054 | 0.020 ± 0.030 | 0.002 ± 0.038 |
 
-The quantile transform is the largest single improvement to the return distribution: TimeGAN's return KL falls from 1.279 to **0.117 ± 0.009** (assignment target <= 0.1) and the baseline's from 1.272 to 0.216. It also brings volatility clustering close to the real test period for TimeGAN (0.097 and 0.078 at lags 1 and 5, against 0.14 and 0.08 real, where the control gave 0.38 and 0.28), while the baseline loses clustering almost entirely (0.020 and 0.002). Winsorising () did not help (KL 1.463). The quantile transform does not change the spread KL (about 1.4 to 1.5) or the ladder violations. One caution: with this transform decoding sends a band of normal scores to exactly zero, so the model does not have to learn exact zeros itself; the improvement comes from the representation as well as from the learning. The 0.117 is also below the real-data reference (0.19), so that reference is not a strict lower bound for a model.
+The quantile transform is the largest single improvement to the return distribution: TimeGAN's return KL falls from 1.279 to **0.117 ± 0.009** (assignment target <= 0.1) and the baseline's from 1.272 to 0.216. It also brings volatility clustering close to the real test period for TimeGAN (0.097 and 0.078 at lags 1 and 5, against 0.14 and 0.08 real, where the control gave 0.38 and 0.28), while the baseline loses clustering almost entirely (0.020 and 0.002). Winsorising (`clip`) did not help (KL 1.463). The quantile transform does not change the spread KL (about 1.4 to 1.5) or the ladder violations. One caution: with this transform decoding sends a band of normal scores to exactly zero, so the model does not have to learn exact zeros itself; the improvement comes from the representation as well as from the learning. The 0.117 is also below the real-data reference (0.19), so that reference is not a strict lower bound for a model.
 
 ### 2. Price ladder representation
 
@@ -203,7 +203,7 @@ Predicting the gaps between levels instead of each level's distance cuts invalid
 | cosine LR, 150 epochs | TimeGAN | 0.159 ± 0.090 | 1.548 ± 0.007 | 1.364 ± 0.155 | 0.258 ± 0.049 | 0.259 ± 0.112 | 0.138 ± 0.066 |
 
 - The **mean/std matching loss is what keeps the ladder ordered**: switching it off lets invalid ladders rise to 79%, even though it gives the lowest spread KL (1.231).
-- A **second discriminator on the decoded features** () lowers the return KL from 1.279 to 0.736 and raises SSIM slightly (0.238 to 0.277), at the cost of 190k extra parameters (479,914 to 670,123) and about 50 MB more GPU memory.
+- A **second discriminator on the decoded features** (`--feature-adv`) lowers the return KL from 1.279 to 0.736 and raises SSIM slightly (0.238 to 0.277), at the cost of 190k extra parameters (479,914 to 670,123) and about 50 MB more GPU memory.
 - Lowering the supervised weight (10), lowering the mean/std weight (10) or a cosine learning-rate schedule with 150 epochs gave no clear gain within seed noise.
 
 ### 4. Depth structure: difference loss
