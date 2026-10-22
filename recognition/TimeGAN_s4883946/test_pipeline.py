@@ -285,6 +285,39 @@ class TestReturnTransform(unittest.TestCase):
                                     real[..., 0].std())
 
 
+class TestEnforcedRules(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        make_fake_lob(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_snapped_garbage_satisfies_every_rule(self):
+        garbage = np.random.default_rng(0).normal(size=(200, 24, N_FEATURES)) * 3
+        for ladder in ("levels", "increments"):
+            snapped = metrics.snap_to_rules(garbage, ladder)
+            self.assertEqual(metrics.microstructure_audit(snapped, ladder)["any"], 0.0, ladder)
+            spread_ticks = metrics.spreads(snapped, ladder) / 0.01
+            np.testing.assert_allclose(spread_ticks, np.round(spread_ticks), atol=1e-6)
+            self.assertGreaterEqual(float(spread_ticks.min()), 1.0 - 1e-9)
+
+    def test_real_windows_pass_through_unchanged(self):
+        for ladder in ("levels", "increments"):
+            loaders, info = get_dataloaders(self.tmp.name, ladder=ladder)
+            real = real_windows(info, "test")
+            np.testing.assert_allclose(metrics.snap_to_rules(real, ladder), real, atol=1e-6)
+
+    def test_returns_are_untouched_and_input_not_modified(self):
+        garbage = np.random.default_rng(1).normal(size=(10, 24, N_FEATURES))
+        before = garbage.copy()
+        snapped = metrics.snap_to_rules(garbage)
+        np.testing.assert_array_equal(snapped[..., 0], garbage[..., 0])
+        np.testing.assert_array_equal(garbage, before)
+
+
 class TestEndToEnd(unittest.TestCase):
     """Tiny train -> predict run on fake data for both models."""
 

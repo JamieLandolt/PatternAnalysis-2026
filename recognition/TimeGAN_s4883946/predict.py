@@ -190,13 +190,16 @@ def main():
                            reference_raw=test_raw, ladder=LADDER)
     ref_row = {"real train period -> test (reference)": ref}
     results = {n: metrics.evaluate(test_raw, s, reference_raw=train_raw, ladder=LADDER) for n, s in synth.items()}
+    results_enforced = {n: metrics.evaluate(test_raw, s, reference_raw=train_raw, ladder=LADDER,
+                                            enforce_rules=True) for n, s in synth.items()}
 
     cols = ["audit_crossed", "audit_ladder", "audit_neg_depth", "kl_spread", "kl_return",
             "acf_lag1", "acf_lag5", "ssim", "ssim_mean_surface"]
     print("\nTest-split comparison (synthetic vs real test windows)")
     print(f"{'':42s}" + "".join(f"{c.replace('audit_', '')[:13]:>14s}" for c in cols))
     real_acf = metrics.abs_return_acf(test_raw)
-    for label, row in {**results, **ref_row}.items():
+    enforced_rows = {f"{n} (rules enforced)": r for n, r in results_enforced.items()}
+    for label, row in {**results, **enforced_rows, **ref_row}.items():
         print(f"{label:42s}" + "".join(f"{row[c]:14.4f}" for c in cols))
     print(f"{'real test windows (ACF only)':42s}" + " " * 14 * 5
           + f"{real_acf[1]:14.4f}{real_acf[5]:14.4f}")
@@ -215,7 +218,8 @@ def main():
                     for n, r in results.items()}, f"{fig_dir}/violations.png")
     fig_autopsy(test_raw, synth, f"{fig_dir}/autopsy.png")
     with open(f"{args.model_dir}/comparison.json", "w") as f:
-        json.dump({"models": results, "real_reference": ref, "real_acf": real_acf}, f, indent=2)
+        json.dump({"models": results, "models_enforced": results_enforced, "real_reference": ref,
+                   "real_acf": real_acf}, f, indent=2)
     print(f"\nFigures written to {fig_dir}")
 
 

@@ -36,6 +36,33 @@ def spreads(raw, ladder="levels"):
     return ask_d[..., 0] + bid_d[..., 0]
 
 
+def snap_to_rules(raw, ladder="levels"):
+    """Decode generated windows onto the market rules (an *enforced* variant).
+
+    The model's output is projected so that: the spread is a whole number of ticks and at
+    least one tick (best ask and bid are placed symmetrically about the mid-price, as in
+    the real data); every gap between successive price levels is a whole number of ticks
+    and at least one tick; volumes are whole numbers and at least 1. The return feature
+    is untouched. Real windows already satisfy these rules and pass through unchanged.
+    Reported separately because it enforces the rules instead of testing what the model
+    learned.
+    """
+    out = np.array(raw, dtype=float, copy=True)
+    dist = {sl: decode_distances(raw[..., sl], ladder) for sl in (ASK_DIST, BID_DIST)}
+    spread = np.maximum(np.round(dist[ASK_DIST][..., 0] + dist[BID_DIST][..., 0]), 1.0)
+    first = (spread / 2)[..., None]
+    for sl, d in dist.items():
+        gaps = np.maximum(np.round(np.diff(d, axis=-1)), 1.0)
+        if ladder == "increments":
+            ticks = np.concatenate([first, gaps], axis=-1)
+        else:
+            ticks = first + np.concatenate([np.zeros_like(first), np.cumsum(gaps, axis=-1)], -1)
+        out[..., sl] = np.log1p(ticks)
+    for sl in (ASK_VOL, BID_VOL):
+        out[..., sl] = np.log1p(np.maximum(np.round(np.expm1(raw[..., sl])), 1.0))
+    return out
+
+
 def microstructure_audit(raw, ladder="levels"):
     """Fraction of snapshots violating each market microstructure rule.
 
@@ -124,13 +151,15 @@ def ssim_mean_surface(synth_heatmaps, real_heatmaps):
                                        win_size=7))
 
 
-def evaluate(real_raw, synth_raw, reference_raw=None, ladder="levels"):
+def evaluate(real_raw, synth_raw, reference_raw=None, ladder="levels", enforce_rules=False):
     """Compare synthetic windows with real windows; returns a flat dict of metrics.
 
     reference_raw is the pool of real windows used for the SSIM nearest-neighbour
     search (defaults to real_raw).
     """
     synth_raw = np.nan_to_num(synth_raw)
+    if enforce_rules:
+        synth_raw = snap_to_rules(synth_raw, ladder)
     ref = real_raw if reference_raw is None else reference_raw
     audit = microstructure_audit(synth_raw, ladder)
     out = {f"audit_{k}": v for k, v in audit.items()}
