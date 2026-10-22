@@ -159,3 +159,82 @@ All metrics compare generated windows with **real test windows** (`metrics.py`).
 - **SSIM of depth heatmaps.** The heatmap of a window is a 20 x 24 image: rows are the bid levels 10 to 1 followed by the ask levels 1 to 10, columns are the 24 time steps, and the colour is `log(1 + volume)`. Each generated heatmap is compared with its nearest real heatmap (smallest L2 distance), and the SSIM is averaged over 300 generated windows. This is a strict measure, so each table also shows the **real-data reference**: the same score for real training windows against real test windows, which is the highest a perfect generator could reasonably reach.
 
 **Real-data reference.** The test period differs from the training period (the average spread is $0.14 in training and $0.11 in the test period), so even real data from the training period does not match the test period perfectly: at the 1-second step its KL is about 0.22 for spread and 0.19 for returns, and its SSIM is 0.30. Targets taken from the assignment (KL <= 0.1, SSIM > 0.6) should be read with these numbers in mind.
+
+## Experiments and results
+
+**Protocol.** Every setting was trained with three seeds (0, 1, 2) for both models where it applies, with the same epochs as the control (TimeGAN: 30 autoencoder, 30 supervised and 100 joint epochs; baseline: 100 epochs), and the checkpoint with the best *validation* KL (spread plus return) was scored once on the *test* split. Tables show mean ± standard deviation over the three seeds. One change is made at a time against the control (z-score returns,  ladder, 1-second step, default loss weights). Crossed books were 0 in every run of every model, so that column is omitted. The *real (train vs test)* row is the reference from the Evaluation section; its ACF values are for real training windows, and the test period itself has 0.14 (lag 1) and 0.08 (lag 5). The differences discussed below are larger than the seed-to-seed spread unless stated otherwise; with only three seeds, small gaps should be treated as noise.
+
+### 1. Return transform
+
+| Setting | Model | Ladder violations | KL spread | KL return | SSIM | ACF lag 1 | ACF lag 5 |
+|---|---|---|---|---|---|---|---|
+| z-score (control) | TimeGAN | 0.214 ± 0.052 | 1.493 ± 0.076 | 1.279 ± 0.065 | 0.238 ± 0.014 | 0.382 ± 0.096 | 0.277 ± 0.036 |
+| z-score (control) | Baseline GAN | 0.990 ± 0.003 | 1.237 ± 0.085 | 1.272 ± 0.045 | 0.382 ± 0.016 | 0.345 ± 0.090 | 0.152 ± 0.067 |
+| z-score (control) | *real (train vs test)* | 0.000 | 0.220 | 0.190 | 0.298 | 0.155 | 0.044 |
+| clip | TimeGAN | 0.280 ± 0.054 | 1.570 ± 0.111 | 1.463 ± 0.115 | 0.223 ± 0.020 | 0.283 ± 0.134 | 0.170 ± 0.096 |
+| clip | Baseline GAN | 0.995 ± 0.006 | 1.607 ± 0.222 | 1.459 ± 0.818 | 0.336 ± 0.043 | 0.324 ± 0.065 | 0.158 ± 0.158 |
+| quantile | TimeGAN | 0.303 ± 0.070 | 1.474 ± 0.034 | 0.117 ± 0.009 | 0.208 ± 0.036 | 0.097 ± 0.017 | 0.078 ± 0.012 |
+| quantile | Baseline GAN | 0.985 ± 0.015 | 1.402 ± 0.262 | 0.216 ± 0.053 | 0.350 ± 0.054 | 0.020 ± 0.030 | 0.002 ± 0.038 |
+
+The quantile transform is the largest single improvement to the return distribution: TimeGAN's return KL falls from 1.279 to **0.117 ± 0.009** (assignment target <= 0.1) and the baseline's from 1.272 to 0.216. It also brings volatility clustering close to the real test period for TimeGAN (0.097 and 0.078 at lags 1 and 5, against 0.14 and 0.08 real, where the control gave 0.38 and 0.28), while the baseline loses clustering almost entirely (0.020 and 0.002). Winsorising () did not help (KL 1.463). The quantile transform does not change the spread KL (about 1.4 to 1.5) or the ladder violations. One caution: with this transform decoding sends a band of normal scores to exactly zero, so the model does not have to learn exact zeros itself; the improvement comes from the representation as well as from the learning. The 0.117 is also below the real-data reference (0.19), so that reference is not a strict lower bound for a model.
+
+### 2. Price ladder representation
+
+| Setting | Model | Ladder violations | KL spread | KL return | SSIM | ACF lag 1 | ACF lag 5 |
+|---|---|---|---|---|---|---|---|
+| levels (control) | TimeGAN | 0.214 ± 0.052 | 1.493 ± 0.076 | 1.279 ± 0.065 | 0.238 ± 0.014 | 0.382 ± 0.096 | 0.277 ± 0.036 |
+| levels (control) | Baseline GAN | 0.990 ± 0.003 | 1.237 ± 0.085 | 1.272 ± 0.045 | 0.382 ± 0.016 | 0.345 ± 0.090 | 0.152 ± 0.067 |
+| levels (control) | *real (train vs test)* | 0.000 | 0.220 | 0.190 | 0.298 | 0.155 | 0.044 |
+| increments | TimeGAN | 0.039 ± 0.006 | 1.468 ± 0.113 | 1.183 ± 0.050 | 0.215 ± 0.048 | 0.047 ± 0.028 | 0.029 ± 0.018 |
+| increments | Baseline GAN | 0.091 ± 0.030 | 1.388 ± 0.138 | 1.534 ± 0.058 | 0.350 ± 0.025 | 0.337 ± 0.141 | 0.116 ± 0.087 |
+
+Predicting the gaps between levels instead of each level's distance cuts invalid ladders from 21.4% to **3.9%** for TimeGAN and from 99.0% to **9.1%** for the baseline, at no cost to the other metrics for TimeGAN. The cost is lower volatility clustering (0.047 and 0.029 for TimeGAN, against 0.14 and 0.08 real). Neither model is forced to be valid: a negative decoded gap still counts as a violation, so this shows the models learning the ordering more easily, not an enforced rule.
+
+### 3. TimeGAN loss and model changes
+
+| Setting | Model | Ladder violations | KL spread | KL return | SSIM | ACF lag 1 | ACF lag 5 |
+|---|---|---|---|---|---|---|---|
+| default (control) | TimeGAN | 0.214 ± 0.052 | 1.493 ± 0.076 | 1.279 ± 0.065 | 0.238 ± 0.014 | 0.382 ± 0.096 | 0.277 ± 0.036 |
+| default (control) | *real (train vs test)* | 0.000 | 0.220 | 0.190 | 0.298 | 0.155 | 0.044 |
+| mean/std loss weight 0 | TimeGAN | 0.791 ± 0.077 | 1.231 ± 0.043 | 1.504 ± 0.070 | 0.328 ± 0.122 | 0.309 ± 0.029 | 0.041 ± 0.223 |
+| mean/std loss weight 10 | TimeGAN | 0.200 ± 0.066 | 1.538 ± 0.142 | 1.387 ± 0.190 | 0.259 ± 0.036 | 0.214 ± 0.108 | 0.158 ± 0.124 |
+| supervised weight 10 | TimeGAN | 0.400 ± 0.170 | 1.463 ± 0.095 | 1.514 ± 0.047 | 0.217 ± 0.037 | 0.271 ± 0.160 | 0.139 ± 0.075 |
+| + feature discriminator | TimeGAN | 0.248 ± 0.040 | 1.498 ± 0.042 | 0.736 ± 0.076 | 0.277 ± 0.013 | 0.276 ± 0.058 | 0.156 ± 0.165 |
+| cosine LR, 150 epochs | TimeGAN | 0.159 ± 0.090 | 1.548 ± 0.007 | 1.364 ± 0.155 | 0.258 ± 0.049 | 0.259 ± 0.112 | 0.138 ± 0.066 |
+
+- The **mean/std matching loss is what keeps the ladder ordered**: switching it off lets invalid ladders rise to 79%, even though it gives the lowest spread KL (1.231).
+- A **second discriminator on the decoded features** () lowers the return KL from 1.279 to 0.736 and raises SSIM slightly (0.238 to 0.277), at the cost of 190k extra parameters (479,914 to 670,123) and about 50 MB more GPU memory.
+- Lowering the supervised weight (10), lowering the mean/std weight (10) or a cosine learning-rate schedule with 150 epochs gave no clear gain within seed noise.
+
+### 4. Depth structure: difference loss
+
+| Setting | Model | Ladder violations | KL spread | KL return | SSIM | ACF lag 1 | ACF lag 5 |
+|---|---|---|---|---|---|---|---|
+| difference loss weight 10 | TimeGAN | 0.258 ± 0.075 | 1.551 ± 0.164 | 1.417 ± 0.046 | 0.287 ± 0.058 | 0.344 ± 0.110 | 0.165 ± 0.018 |
+| difference loss weight 10 | *real (train vs test)* | 0.000 | 0.220 | 0.190 | 0.298 | 0.155 | 0.044 |
+| difference loss weight 100 | TimeGAN | 0.157 ± 0.060 | 1.584 ± 0.191 | 1.489 ± 0.059 | 0.275 ± 0.032 | 0.091 ± 0.107 | 0.052 ± 0.044 |
+
+Real depth surfaces hold their volumes and then jump. Adding moment matching on first differences over time raises SSIM from 0.238 to 0.287 ± 0.058 (real reference 0.298), but the gain is only about one standard deviation, so it is suggestive and not conclusive. With the larger weight (100) the volatility clustering falls close to real (0.091 and 0.052), while the return KL stays high on z-scored returns.
+
+### 5. Grid step size
+
+| Setting | Model | Ladder violations | KL spread | KL return | SSIM | ACF lag 1 | ACF lag 5 |
+|---|---|---|---|---|---|---|---|
+| 0.5 s | TimeGAN | 0.264 ± 0.018 | 1.582 ± 0.188 | 1.601 ± 0.036 | 0.375 ± 0.007 | 0.395 ± 0.033 | 0.292 ± 0.013 |
+| 0.5 s | Baseline GAN | 0.973 ± 0.020 | 1.490 ± 0.305 | 1.335 ± 0.304 | 0.424 ± 0.055 | 0.395 ± 0.218 | 0.146 ± 0.161 |
+| 0.5 s | *real (train vs test)* | 0.000 | 0.221 | 0.013 | 0.381 | 0.106 | 0.035 |
+| 1 s (control) | TimeGAN | 0.214 ± 0.052 | 1.493 ± 0.076 | 1.279 ± 0.065 | 0.238 ± 0.014 | 0.382 ± 0.096 | 0.277 ± 0.036 |
+| 1 s (control) | Baseline GAN | 0.990 ± 0.003 | 1.237 ± 0.085 | 1.272 ± 0.045 | 0.382 ± 0.016 | 0.345 ± 0.090 | 0.152 ± 0.067 |
+| 1 s (control) | *real (train vs test)* | 0.000 | 0.220 | 0.190 | 0.298 | 0.155 | 0.044 |
+| 5 s | TimeGAN | 0.093 ± 0.013 | 1.474 ± 0.061 | 0.409 ± 0.137 | 0.232 ± 0.061 | 0.435 ± 0.161 | 0.149 ± 0.055 |
+| 5 s | Baseline GAN | 0.992 ± 0.011 | 4.658 ± 2.858 | 3.462 ± 1.169 | 0.165 ± 0.084 | 0.499 ± 0.446 | 0.412 ± 0.441 |
+| 5 s | *real (train vs test)* | 0.000 | 0.225 | 0.057 | 0.205 | 0.140 | 0.050 |
+| 10 s | TimeGAN | 0.077 ± 0.017 | 1.593 ± 0.041 | 0.355 ± 0.184 | 0.174 ± 0.021 | 0.368 ± 0.200 | 0.163 ± 0.112 |
+| 10 s | Baseline GAN | 0.970 ± 0.016 | 6.882 ± 3.067 | 2.985 ± 1.274 | 0.128 ± 0.027 | 0.685 ± 0.052 | -0.300 ± 0.256 |
+| 10 s | *real (train vs test)* | 0.000 | 0.222 | 0.131 | 0.180 | 0.157 | 0.107 |
+
+Larger steps help TimeGAN: the return KL falls from 1.279 (1 s) to 0.409 (5 s) and 0.355 (10 s), and invalid ladders from 21.4% to 9.3% and 7.7%. The baseline GAN breaks down at coarse steps (spread KL 4.66 and 6.88, return KL 3.46 and 2.99), so TimeGAN is more robust there. At the finest step (0.5 s) TimeGAN's SSIM (0.375) is almost at the real ceiling (0.381), because depth surfaces become smoother in time at a finer step. Each step size has its own real reference, because the windows cover different time spans (24 steps is 12 seconds, 24 seconds, 2 minutes or 4 minutes), so KL and SSIM are not directly comparable across steps. Coarser steps also leave far fewer training steps (about 2,800 at 5 s and 1,400 at 10 s), which may explain the baseline's instability.
+
+### What did not move: the spread
+
+Across every setting the spread KL stays between 1.2 and 1.6, against a real-data reference of 0.22. The lowest values (1.231 with no mean/std loss, and 1.237 for the baseline) come from models whose ladders are mostly invalid. The spread is the sum of the best ask distance and the best bid distance, which are generated separately, so small errors in each add up. Modelling the spread (and the mid-price offset) directly is an untested idea for future work.
