@@ -32,7 +32,8 @@ def load_model(path, device):
     ckpt = torch.load(path, map_location=device)
     a = ckpt["args"]
     model = build_model(a["model"], N_FEATURES, a["hidden"], a["layers"],
-                        feature_adv=a.get("feature_adv", False)).to(device)
+                        feature_adv=a.get("feature_adv", False),
+                        hold_gate=a.get("hold_gate", False)).to(device)
     model.load_state_dict(ckpt["state_dict"])
     return model.eval(), a
 

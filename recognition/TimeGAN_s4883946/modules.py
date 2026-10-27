@@ -59,6 +59,33 @@ class Recovery(GRUHead):
         super().__init__(hidden_dim, hidden_dim, feat_dim, num_layers)
 
 
+class GatedRecovery(nn.Module):
+    """Recovery with a hold gate on the 40 order book features (not the return).
+
+    Real books hold most values from one step to the next. At every step a gate decides
+    per feature whether to take the newly decoded value or keep the previous step's value.
+    The gate is binary in the forward pass (so training sees exact holds, like sampling)
+    and uses a sigmoid gradient (straight-through) in the backward pass.
+    """
+
+    def __init__(self, feat_dim, hidden_dim, num_layers):
+        super().__init__()
+        self.gru = nn.GRU(hidden_dim, hidden_dim, num_layers, batch_first=True)
+        self.value = nn.Linear(hidden_dim, feat_dim)
+        self.gate = nn.Linear(hidden_dim, feat_dim - 1)
+
+    def forward(self, h):
+        out, _ = self.gru(h)
+        value, p = self.value(out), torch.sigmoid(self.gate(out))
+        g = (p > 0.5).float() + p - p.detach()   # straight-through binary gate
+        g = torch.cat([torch.ones_like(g[:, :1]), g[:, 1:]], dim=1)   # first step always writes
+        book, prev = [], value[:, 0, 1:]
+        for t in range(h.shape[1]):
+            prev = g[:, t] * value[:, t, 1:] + (1 - g[:, t]) * prev
+            book.append(prev)
+        return torch.cat([value[..., :1], torch.stack(book, dim=1)], dim=-1)
+
+
 class LatentGenerator(GRUHead):
     """Maps noise sequences (B, T, Z) to latent sequences (B, T, H) in (0, 1)."""
 
@@ -85,12 +112,13 @@ class TimeGAN(nn.Module):
     """Container for the five TimeGAN networks plus a sampling helper."""
 
     def __init__(self, feat_dim, hidden_dim=64, num_layers=3, noise_dim=None,
-                 feature_adv=False):
+                 feature_adv=False, hold_gate=False):
         super().__init__()
         self.feat_dim = feat_dim
         self.noise_dim = noise_dim or feat_dim
         self.embedder = Embedder(feat_dim, hidden_dim, num_layers)
-        self.recovery = Recovery(feat_dim, hidden_dim, num_layers)
+        # Optional extension: decoder that can hold the previous book values (see GatedRecovery)
+        self.recovery = (GatedRecovery if hold_gate else Recovery)(feat_dim, hidden_dim, num_layers)
         self.generator = LatentGenerator(self.noise_dim, hidden_dim, num_layers)
         self.supervisor = Supervisor(hidden_dim, num_layers)
         self.discriminator = SequenceDiscriminator(hidden_dim, hidden_dim, num_layers)
@@ -134,10 +162,11 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def build_model(name, feat_dim, hidden_dim=64, num_layers=3, feature_adv=False):
+def build_model(name, feat_dim, hidden_dim=64, num_layers=3, feature_adv=False, hold_gate=False):
     """Create 'timegan' or 'baseline' with the given sizes."""
     if name == "timegan":
-        return TimeGAN(feat_dim, hidden_dim, num_layers, feature_adv=feature_adv)
+        return TimeGAN(feat_dim, hidden_dim, num_layers, feature_adv=feature_adv,
+                       hold_gate=hold_gate)
     if name == "baseline":
         return RecurrentGAN(feat_dim, hidden_dim, num_layers)
     raise ValueError(f"unknown model '{name}' (expected 'timegan' or 'baseline')")

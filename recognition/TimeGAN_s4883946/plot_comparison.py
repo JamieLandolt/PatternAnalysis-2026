@@ -45,6 +45,10 @@ def main():
     p.add_argument("--minutes", type=float, default=10.0)
     p.add_argument("--offset-minutes", type=float, default=0.0,
                    help="start this many minutes into the test period")
+    p.add_argument("--continuous", action="store_true",
+                   help="generate the whole stretch as one sequence instead of joining windows")
+    p.add_argument("--enforce", action="store_true",
+                   help="snap generated prices and volumes onto the market rules first")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default="figures/real_vs_timegan_window.png")
     args = p.parse_args()
@@ -61,15 +65,19 @@ def main():
 
     real_raw = info["feats_raw"][s0:s0 + n_steps]
     start_mid = info["mid"][s0 - 1]
-    n_win = math.ceil(n_steps / seq_len)
-    synth = denormalise(model.sample(n_win, seq_len).numpy(), info)
+    n_win = 1 if args.continuous else math.ceil(n_steps / seq_len)
+    win_len = n_steps if args.continuous else seq_len
+    synth = denormalise(model.sample(n_win, win_len).numpy(), info)
     synth_raw = synth.reshape(-1, synth.shape[-1])[:n_steps]
+    if args.enforce:
+        synth_raw = metrics.snap_to_rules(synth_raw, ladder)
 
     clock0 = info["grid"][s0] if "grid" in info else 0.0
     start_clock = clock0  # seconds after midnight
     fmt = lambda t: f"{int(t // 3600):02d}:{int(t % 3600 // 60):02d}"
     title_real = f"Real test data ({fmt(start_clock)} to {fmt(start_clock + n_steps * step)})"
-    title_synth = f"{args.model} generated ({n_win} windows of {seq_len * step:.0f} s joined)"
+    title_synth = (f"{args.model} generated (one continuous sequence)" if args.continuous else
+                   f"{args.model} generated ({n_win} windows of {seq_len * step:.0f} s joined)")
 
     data = [series(real_raw, start_mid, ladder), series(synth_raw, start_mid, ladder)]
     t = np.arange(n_steps) * step / 60   # minutes
@@ -110,7 +118,7 @@ def main():
         ax.set_ylim(0, ret_hi); ax.set_xlabel("time (minutes)")
         if col == 0:
             ax.set_ylabel("|1 s move| (bp)")
-    for k in range(1, n_win):   # window joins in the generated column
+    for k in range(1, 1 if args.continuous else n_win):   # window joins in the generated column
         for r in range(4):
             axes[r, 1].axvline(k * seq_len * step / 60, color="grey", lw=0.5, ls="--", alpha=0.35)
     fig.colorbar(im, cax=axes[2, 2], label="log(1 + volume)")

@@ -134,6 +134,21 @@ class TestModules(unittest.TestCase):
         self.assertEqual(tuple(t.feature_discriminator(x).shape), (3, 24, 1))
         self.assertGreater(count_parameters(t), count_parameters(TimeGAN(N_FEATURES, 16, 2)))
 
+    def test_hold_gate_decoder(self):
+        t = TimeGAN(N_FEATURES, 16, 2, hold_gate=True)
+        h = torch.rand(4, 24, 16)
+        x = t.recovery(h)
+        self.assertEqual(tuple(x.shape), (4, 24, N_FEATURES))
+        # gated outputs are exact copies of an earlier step's value, so a run of equal
+        # steps must exist somewhere (a plain decoder almost never repeats a float)
+        held = (x[:, 1:, 1:] == x[:, :-1, 1:]).float().mean()
+        self.assertGreater(float(held), 0.0)
+        x.pow(2).mean().backward()   # gradients reach the gate and the embedder path
+        self.assertTrue(all(p.grad is not None for p in t.recovery.parameters()))
+        # a recurrent decoder may be run for longer than it was trained on
+        self.assertEqual(tuple(t.sample(2, 100).shape), (2, 100, N_FEATURES))
+        self.assertGreater(count_parameters(t), count_parameters(TimeGAN(N_FEATURES, 16, 2)))
+
     def test_build_model(self):
         self.assertIsInstance(build_model("timegan", N_FEATURES), TimeGAN)
         self.assertIsInstance(build_model("baseline", N_FEATURES), RecurrentGAN)

@@ -6,6 +6,7 @@
 #   ./run_experiments.sh ladder         # price ladder as distances vs gaps between levels
 #   ./run_experiments.sh combined       # best changes from the other groups, together
 #   ./run_experiments.sh depth          # difference moment-matching loss for depth persistence
+#   ./run_experiments.sh improve        # longer windows and the hold-gate decoder (SBATCH_TIME=04:00:00)
 # Results land in outputs/<group>/<setting>/<model>_s<seed>/ (gitignored).
 export PATH=/opt/slurm/bin:$PATH
 GROUP=${1:?usage: run_experiments.sh <transform|step|loss|depth|ladder|combined>}
@@ -50,10 +51,20 @@ for seed in $SEEDS; do
             submit all_step5 $model $seed $ALL --step 5
             submit all_step05 $model $seed $ALL --step 0.5
         fi ;;
+      improve)
+        BEST="--return-transform quantile --ladder increments"
+        ALL="$BEST --feature-adv --w-diff 10"
+        if [[ $model == timegan ]]; then
+            submit len120      $model $seed $ALL --seq-len 120
+            submit gate24      $model $seed $ALL --hold-gate
+            submit gate120     $model $seed $ALL --hold-gate --seq-len 120
+        else
+            submit len120      $model $seed $BEST --seq-len 120
+        fi ;;
       *) echo "unknown group $GROUP"; exit 1 ;;
     esac
   done
   if [ -z "$DRYRUN" ]; then
-      sbatch --parsable --job-name=${GROUP:0:4}_s$seed slurm_pack.sh "$CMDFILE"
+      sbatch --parsable ${SBATCH_TIME:+--time=$SBATCH_TIME} --job-name=${GROUP:0:4}_s$seed slurm_pack.sh "$CMDFILE"
   fi
 done

@@ -231,6 +231,8 @@ def main():
                    help="weight of moment matching on first differences over time (0 = off)")
     p.add_argument("--feature-adv", action="store_true",
                    help="TimeGAN: add a discriminator on decoded features")
+    p.add_argument("--hold-gate", action="store_true",
+                   help="TimeGAN: decoder may hold the previous step's book values")
     p.add_argument("--lr-schedule", choices=["none", "cosine"], default="none")
     p.add_argument("--eval-every", type=int, default=5)
     p.add_argument("--n-eval", type=int, default=2000, help="synthetic windows per evaluation")
@@ -250,7 +252,8 @@ def main():
                                     ladder=args.ladder)
     raw = {k: real_windows(info, k) for k in loaders}   # untransformed real windows
     model = build_model(args.model, N_FEATURES, args.hidden, args.layers,
-                        feature_adv=args.feature_adv).to(device)
+                        feature_adv=args.feature_adv,
+                        hold_gate=args.hold_gate).to(device)
     print(f"{args.model}: {count_parameters(model):,} parameters on {device}", flush=True)
 
     history = {"ae_loss": [], "sup_loss": [], "g_loss": [], "e_loss": [], "d_loss": [], "val": []}
