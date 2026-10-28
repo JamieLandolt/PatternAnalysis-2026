@@ -99,6 +99,7 @@ def train_timegan(model, loaders, args, device, history, evaluator):
     joint_opts = [opt_g, opt_e, opt_d] + ([opt_dx] if opt_dx else [])
     schedulers = ([torch.optim.lr_scheduler.CosineAnnealingLR(o, T_max=max(args.epochs, 1))
                    for o in joint_opts] if args.lr_schedule == "cosine" else [])
+    # separate optimisers, so each phase only updates the networks it is meant to train
     ones = lambda t: torch.ones_like(t)
     zeros = lambda t: torch.zeros_like(t)
 
@@ -126,7 +127,9 @@ def train_timegan(model, loaders, args, device, history, evaluator):
         history["sup_loss"].append(float(np.mean(losses)))
         print(f"[SUP {epoch + 1}/{args.sup_epochs}] loss {history['sup_loss'][-1]:.5f}", flush=True)
 
-    # Phase 3: joint training
+    # Phase 3: joint training. The generator side takes two steps for each discriminator step,
+    # and the discriminator is skipped when it is already winning (D_THRESHOLD), which keeps
+    # the two sides balanced.
     for epoch in range(args.epochs):
         g_l, e_l, d_l = [], [], []
         for x in batches(loaders["train"], device, args.max_batches):
@@ -159,6 +162,7 @@ def train_timegan(model, loaders, args, device, history, evaluator):
                 h_hat = model.supervisor(e_hat)
             y_real, y_fake = model.discriminator(h), model.discriminator(h_hat)
             y_fake_e = model.discriminator(e_hat)
+            # discriminator: real latents should score 1, generated latents 0
             d_loss = (bce(y_real, ones(y_real)) + bce(y_fake, zeros(y_fake))
                       + GAMMA * bce(y_fake_e, zeros(y_fake_e)))
             if d_loss.item() > D_THRESHOLD:
@@ -301,7 +305,8 @@ def main():
     trainer(model, loaders, args, device, history, evaluator)
     train_seconds = time.time() - t0
 
-    # Test with the best-validation checkpoint (test split used only here)
+    # Test with the best-validation checkpoint (test split used only here). Going back to the
+    # best checkpoint matters because GAN quality can get worse late in training.
     model.load_state_dict(best["state"])
     test = metrics.evaluate(raw["test"], synth_raw(args.n_eval), reference_raw=raw["train"],
                           ladder=args.ladder)

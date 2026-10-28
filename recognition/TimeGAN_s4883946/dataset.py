@@ -97,11 +97,13 @@ def build_features(book, ladder="levels"):
     mid = (ask_p[:, 0] + bid_p[:, 0]) / 2
     ret = np.zeros(len(mid))
     ret[1:] = np.diff(np.log(mid))   # first step has no previous snapshot
+    # distances from the mid in ticks (a tick is the smallest price step, $0.01)
     ask_ticks = (ask_p - mid[:, None]) / TICK
     bid_ticks = (mid[:, None] - bid_p) / TICK
     if ladder == "increments":   # keep level 1, replace the rest by gaps between levels
         ask_ticks = np.concatenate([ask_ticks[:, :1], np.diff(ask_ticks, axis=1)], axis=1)
         bid_ticks = np.concatenate([bid_ticks[:, :1], np.diff(bid_ticks, axis=1)], axis=1)
+    # log1p shrinks the long right tail of distances and volumes so z-scoring behaves
     ask_dist, bid_dist = np.log1p(ask_ticks), np.log1p(bid_ticks)
     feats = np.concatenate(
         [ret[:, None], ask_dist, bid_dist, np.log1p(ask_v), np.log1p(bid_v)], axis=1
@@ -165,6 +167,7 @@ def make_windows(feats, seq_len, stride=1):
 
     Windows are built inside one split only, so none straddles a split boundary.
     """
+    # one window per start index; the last start leaves room for a full window
     starts = np.arange(0, len(feats) - seq_len + 1, stride)
     return np.stack([feats[s:s + seq_len] for s in starts]).astype(np.float32)
 

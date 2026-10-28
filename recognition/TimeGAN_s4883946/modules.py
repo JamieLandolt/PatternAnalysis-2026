@@ -81,7 +81,9 @@ class GatedRecovery(nn.Module):
     def forward(self, h):
         out, _ = self.gru(h)
         value, p = self.value(out), torch.sigmoid(self.gate(out))
-        g = (p > 0.5).float() + p - p.detach()   # straight-through binary gate
+        # straight-through trick: forward pass uses the 0/1 decision, backward pass uses the
+        # smooth sigmoid, so training can still learn the gate
+        g = (p > 0.5).float() + p - p.detach()
         g = torch.cat([torch.ones_like(g[:, :1]), g[:, 1:]], dim=1)   # first step always writes
         book, prev = [], value[:, 0, 1:]
         for t in range(h.shape[1]):

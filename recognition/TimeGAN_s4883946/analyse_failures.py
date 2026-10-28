@@ -24,9 +24,10 @@ from predict import COLOURS, load_model
 
 
 def analyse(name, raw, real_spread_ticks, ladder):
+    """Print the tick-grid, ladder and negative-depth failure rates of one model's windows."""
     ask_d, bid_d = metrics.distances(raw, ladder)
     spread_ticks = ((ask_d[..., 0] + bid_d[..., 0]) / TICK).ravel()
-    rounded = np.maximum(np.round(spread_ticks), 1.0)
+    rounded = np.maximum(np.round(spread_ticks), 1.0)   # what the spread would be on the grid
     off_grid = np.abs(spread_ticks - np.round(spread_ticks)) > 0.1
     print(f"\n== {name}")
     print(f"spread: {100 * off_grid.mean():.1f}% of generated spreads are more than 0.1 tick "
@@ -46,6 +47,7 @@ def analyse(name, raw, real_spread_ticks, ladder):
           f"{100 * first_level.mean():.0f}% involve levels 1 to 3 (the touch)")
     print(f"ladder: {100 * (gaps < 1).any(-1).mean():.1f}% of snapshots have a gap under one tick "
           "(real data: 0%)")
+    # log1p(volume) below 0 decodes to a negative share count
     neg = (raw[..., metrics.ASK_VOL] < 0) | (raw[..., metrics.BID_VOL] < 0)
     print(f"depth: {100 * neg.any(-1).mean():.2f}% of snapshots have a negative volume "
           f"({100 * neg.mean():.3f}% of all level volumes)")
@@ -71,6 +73,7 @@ def main():
                                     return_transform=cfg.get("return_transform", "zscore"),
                                     clip_q=cfg.get("clip_q", 0.5), ladder=ladder)
     real = real_windows(info, "test")
+    # real spreads in ticks: the reference the generated spreads are compared with
     real_ticks = (metrics.spreads(real, ladder) / TICK).ravel()
     print(f"real test spreads: {100 * (np.abs(real_ticks - np.round(real_ticks)) > 0.1).mean():.1f}% "
           f"off the tick grid; mean {real_ticks.mean():.2f} ticks")

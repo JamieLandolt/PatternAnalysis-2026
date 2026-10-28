@@ -29,6 +29,7 @@ COLOURS = {"real": "black", "timegan": "tab:blue", "baseline": "tab:orange"}
 
 
 def load_model(path, device):
+    """Rebuild a model from the settings saved in its checkpoint, then load its weights."""
     ckpt = torch.load(path, map_location=device)
     a = ckpt["args"]
     model = build_model(a["model"], N_FEATURES, a["hidden"], a["layers"],
@@ -65,8 +66,10 @@ def fig_heatmaps(real_raw, synth, out, n_cols=4, seed=0):
 
 
 def fig_distributions(real_raw, synth, out):
+    """Histograms of spread and of 1-step returns, real against each model."""
     fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
     sp_real = metrics.spreads(real_raw, LADDER).ravel()
+    # histogram range: the real 0.5th to 99.5th percentile, padded so model tails stay visible
     lo, hi = np.percentile(sp_real, [0.5, 99.5])
     pad = (hi - lo) * 0.5
     bins = np.linspace(lo - pad, hi + pad, 60)
@@ -88,6 +91,7 @@ def fig_distributions(real_raw, synth, out):
 
 
 def fig_volatility(real_raw, synth, out, seed=0):
+    """Left: autocorrelation of |return| (volatility clustering). Right: sample price paths."""
     lags = (1, 2, 3, 5, 8, 10)
     fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
     width = 0.8 / (1 + len(synth))
@@ -110,6 +114,7 @@ def fig_volatility(real_raw, synth, out, seed=0):
 
 
 def fig_violations(audits, out):
+    """Bar chart of how often each market rule is broken, per model."""
     keys = ["crossed", "ladder", "neg_depth", "any"]
     fig, ax = plt.subplots(figsize=(7, 3.6))
     width = 0.8 / len(audits)
@@ -132,15 +137,15 @@ def violation_score(raw):
 
 def fig_autopsy(real_raw, synth, out, k=3):
     """Worst generated snapshots per model: price distance by level vs a real snapshot."""
-    ask_r, bid_r = metrics.distances(real_raw[:1], LADDER)
+    ask_r, bid_r = metrics.distances(real_raw[:1], LADDER)   # one real snapshot as the reference
     levels = np.arange(1, LEVELS + 1)
     fig, axes = plt.subplots(len(synth), k, figsize=(3.6 * k, 3 * len(synth)), squeeze=False)
     for r, (name, raw) in enumerate(synth.items()):
         score = violation_score(raw).ravel()
-        worst = np.argsort(score)[::-1][:k]
+        worst = np.argsort(score)[::-1][:k]   # indices of the k most invalid snapshots
         ask_d, bid_d = metrics.distances(raw, LADDER)
         for c, idx in enumerate(worst):
-            w, t = divmod(idx, raw.shape[1])
+            w, t = divmod(idx, raw.shape[1])   # flat index -> (window, time step)
             ax = axes[r, c]
             ax.plot(levels, ask_r[0, 0] / TICK, "k--", label="real ask")
             ax.plot(levels, bid_r[0, 0] / TICK, "k:", label="real bid")
@@ -164,13 +169,15 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
     torch.manual_seed(args.seed)
-    device = torch.device("cpu")
+    device = torch.device("cpu")   # sampling is cheap, no GPU needed
     fig_dir = f"{args.model_dir}/figures"
     os.makedirs(fig_dir, exist_ok=True)
 
     models, cfgs = {}, {}
     for name in args.models:
         models[name], cfgs[name] = load_model(f"{args.model_dir}/{name}.pt", device)
+    # rebuild the data pipeline with the same settings the models were trained with, so the
+    # normalisation and return transform match
     cfg = next(iter(cfgs.values()))
     loaders, info = get_dataloaders(args.data_dir, cfg["seq_len"], cfg["step"],
                                     return_transform=cfg.get("return_transform", "zscore"),
@@ -180,6 +187,7 @@ def main():
     LADDER = cfg.get("ladder", "levels")
     train_raw, test_raw = real_windows(info, "train"), real_windows(info, "test")
 
+    # generate windows and undo the normalisation to get raw features
     synth = {n: denormalise(m.sample(args.n_samples, cfg["seq_len"], device).numpy(), info)
              for n, m in models.items()}
 
@@ -194,6 +202,7 @@ def main():
     results_enforced = {n: metrics.evaluate(test_raw, s, reference_raw=train_raw, ladder=LADDER,
                                             enforce_rules=True) for n, s in synth.items()}
 
+    # table of test-split metrics: raw output, rules-enforced output, then the real-data reference
     cols = ["audit_crossed", "audit_ladder", "audit_neg_depth", "kl_spread", "kl_return",
             "acf_lag1", "acf_lag5", "ssim", "ssim_mean_surface"]
     print("\nTest-split comparison (synthetic vs real test windows)")
@@ -212,6 +221,7 @@ def main():
             print(f"{n}: {prof['parameters']:,} params, trained in {prof['train_seconds']:.0f}s on "
                   f"{prof['device']}, 1000 windows sampled in {prof['sample_1000_windows_seconds']:.3f}s")
 
+    # all figures compare against the real *test* windows
     fig_heatmaps(test_raw, synth, f"{fig_dir}/depth_heatmaps.png")
     fig_distributions(test_raw, synth, f"{fig_dir}/distributions.png")
     fig_volatility(test_raw, synth, f"{fig_dir}/volatility.png")

@@ -22,6 +22,7 @@ RES = [("params", "parameters"), ("train_s", "train_seconds"), ("vram_mb", "peak
 
 
 def main(groups):
+    """Print one markdown row per (setting, model), with a real-data reference row after each."""
     heads = COLS + [r[0] for r in RES]
     print("| group | setting | model | seeds | " + " | ".join(heads) + " |")
     print("|" + "---|" * (4 + len(heads)))
@@ -34,6 +35,7 @@ def main(groups):
                         sorted(glob.glob(f"{setting_dir}/{model}_s*/{model}_summary.json"))]
                 if not runs:
                     continue
+                # every run stores the same real train-vs-test reference, so averaging is safe
                 refs += [r["reference"] for r in runs if "reference" in r]
                 cells = []
                 for c in COLS:

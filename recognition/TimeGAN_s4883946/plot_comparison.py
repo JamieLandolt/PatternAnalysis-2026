@@ -27,7 +27,7 @@ def series(raw, start_mid, ladder):
     """Turn (T, 41) raw features into mid, best bid/ask, spread (ticks), depth, returns."""
     ask_d, bid_d = metrics.distances(raw[None], ladder)
     ask_d, bid_d = ask_d[0], bid_d[0]
-    mid = start_mid * np.exp(np.cumsum(raw[:, 0]))
+    mid = start_mid * np.exp(np.cumsum(raw[:, 0]))   # rebuild prices from the log-returns
     return {
         "mid": mid,
         "ask": mid + ask_d[:, 0], "bid": mid - bid_d[:, 0],
