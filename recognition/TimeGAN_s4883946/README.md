@@ -1,10 +1,20 @@
-# TimeGAN for Limit Order Book Simulation (LOBSTER AMZN, Level 10)
+# TimeGAN Market Data Generation
+
+TimeGAN for limit order book simulation (LOBSTER AMZN, Level 10).
 
 Project 2.7 (Time-Series Generation: Limit Order Book and Market Simulation), Hard difficulty.
 
 Author: Jamie Landolt (s4883946)
 
-## Overview
+## The Problem
+
+Real microsecond Limit Order Book (LOB) data is commercially restricted and expensive. In quantitative finance, access to such data permits the evaluation of strategies, algorithms, and risk systems. Such data can be generated, however doing so is a non-trivial task. Multiple invariants and patterns which hold for realistic data must also hold for the generated data, such as spread validity ($P_{bid,1} < P_{ask,1}$), monotonic price ladders across levels, non-negative liquidity depth, and patterns surrounding volatility clustering.
+
+## How The Model Works
+
+A model such as a TimeGAN, which combines the two-network architecture of an autoencoder (embedder and recovery) with a GAN (modified by adding a third supervisor network), can be used to generate realistic data that conforms to the patterns and invariants that hold for the real market data. After training, noise can be sampled from the latent space, run through the generator and tweaked by the supervisor to produce realistic market data. Through training, the TimeGAN can learn to produce similar patterns and enforce market invariants (how well it does so here is measured in the experiments below).
+
+## Overview of this project
 
 **Problem.** Evaluating trading algorithms and risk systems needs realistic market simulations, but real limit order book (LOB) data is expensive. A generative model can produce synthetic order book sequences, but an order book is not an ordinary time series: it must obey hard rules. The best bid must be below the best ask (a *crossed book* would be a free arbitrage), prices must be ordered across the 10 depth levels, volumes cannot be negative, and the sequence should show real stylised facts such as volatility clustering and heavy-tailed returns. This project trains a **TimeGAN** on one day of AMZN Level-10 data from LOBSTER and audits whether the generated 24-second order book windows respect those rules and match the real distributions, compared with a plain recurrent GAN baseline.
 
