@@ -30,6 +30,10 @@ noise z --Generator--> e^ --Supervisor--> h^ --Recovery--> x^   (synthetic windo
 Discriminator: real latents h   vs   generated latents h^, e^    (adversarial loss)
 ```
 
+**Example output.** Ten minutes of real test-period order book (left) next to the same length of TimeGAN output (right). From top to bottom: mid-price with the best bid and ask, spread in ticks, depth heatmap (bid levels 10 to 1, then ask levels 1 to 10) and the size of each one-second price move. The generated side is 25 independent 24-second windows joined end to end (dashed lines mark the joins), so it has no memory across a join. The model matches the size and rhythm of the price moves and the range of the spread. It does not match the real book's persistence: its spread changes every second, its depth is fine-grained rather than blocky, and its prices are off the tick grid (see the failure case autopsy). Produced by `plot_comparison.py` with the final TimeGAN.
+
+![Real test window versus generated TimeGAN data](figures/real_vs_timegan_window.png)
+
 ## Files
 
 | File | Purpose |
