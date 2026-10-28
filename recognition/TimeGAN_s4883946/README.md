@@ -36,7 +36,7 @@ Discriminator: real latents h   vs   generated latents h^, e^    (adversarial lo
 
 **Short version.** The model never made a crossed book, matches the real return distribution well, and keeps price bursts at about the right level. It is weaker on the spread (the gap between best bid and best ask) and on the depth picture.
 
-**The assignment targets are too hard for any model on this data.** The assignment asks for KL ≤ 0.1 and SSIM > 0.6. We only have one trading day, so the day is cut by time: the morning trains the model and the afternoon tests it. The afternoon is different from the morning (for example, the average spread is $0.14 in the morning and $0.11 in the afternoon). So we asked a fair question: how well does **real morning data** score against the real afternoon? That is about the best any perfect fake data could do. Real data scores KL of about 0.2 and SSIM of about 0.3, so it misses both targets too. Our results should be read against the third column below, and not only against the targets.
+**The assignment targets are too hard for any model on this data.** The assignment asks for KL ≤ 0.1 and SSIM > 0.6. We only have one trading day, so the day is cut by time: the morning trains the model and the afternoon tests it. The afternoon is different from the morning (for example, the average spread is \$0.14 in the morning and \$0.11 in the afternoon). So we asked a fair question: how well does **real morning data** score against the real afternoon? That is about the best any perfect fake data could do. Real data scores KL of about 0.2 and SSIM of about 0.3, so it misses both targets too. Our results should be read against the third column below, and not only against the targets.
 
 | Measure | Assignment target | Real morning vs real afternoon (best we can expect) | Final TimeGAN (1 s step) |
 |---|---|---|---|
@@ -55,7 +55,7 @@ More detail is in Evaluation and Experiments below.
 | Order book | The list of waiting buy (bid) and sell (ask) orders, with 10 price levels on each side |
 | Mid-price | The price halfway between the best bid and the best ask |
 | Spread | The gap between the best ask and the best bid |
-| Tick | The smallest price step, $0.01 |
+| Tick | The smallest price step, \$0.01 |
 | Depth | How many shares are waiting at each price level |
 | Window | A 24-second slice of order book data |
 | Crossed book | Best bid at or above best ask, which cannot happen in a real market |
@@ -170,7 +170,7 @@ The intended user is a developer who wants realistic order books to test trading
 | Crossed or locked books | 0 of 269,748 |
 | Non-monotonic bid or ask ladders | 0 |
 | Negative or zero depth | 0 |
-| Spread | $0.01 to $0.77 (median $0.13) |
+| Spread | \$0.01 to \$0.77 (median \$0.13) |
 | Zero mid-price change per event / per 1 s grid step | 89.8% / 70.1% |
 | Return kurtosis per event / per 1 s grid step | about 203 / 38.5 (Gaussian = 3) |
 | Autocorrelation of absolute returns, per event (lags 1 / 5 / 20) | 0.25 / 0.15 / 0.10 |
@@ -198,7 +198,7 @@ What this means: (a) the real data is clean, so any broken rule in fake data com
 
 ## Data and preprocessing
 
-**Data.** LOBSTER sample file for AMZN on 2012-06-21, 09:30 to 16:00, 10 price levels: 269,748 order book events (Huang and Polak, 2011). Prices are stored in units of 1/10,000 dollar, and the smallest price step (tick) is $0.01.
+**Data.** LOBSTER sample file for AMZN on 2012-06-21, 09:30 to 16:00, 10 price levels: 269,748 order book events (Huang and Polak, 2011). Prices are stored in units of 1/10,000 dollar, and the smallest price step (tick) is \$0.01.
 
 **Preprocessing** (all in `dataset.py`):
 
@@ -224,7 +224,7 @@ All metrics compare generated windows with **real test windows** (`metrics.py`).
 - **Volatility clustering:** autocorrelation of absolute returns inside windows at lags 1 and 5 (do big moves follow big moves?).
 - **SSIM of depth pictures.** Each window's depth is a 20 x 24 picture: rows are the bid levels 10 to 1 then the ask levels 1 to 10, columns are the 24 seconds, and colour is `log(1 + volume)`. Each fake picture is compared with its closest real picture (smallest L2 distance) and the SSIM is averaged over 300 fake windows. This is a strict test, so every table also shows the **real-data reference**: the same score for real training windows against real test windows, which is about the best a perfect generator could hope for.
 
-**Real-data reference.** The test period differs from the training period (the average spread is $0.14 in training and $0.11 in test), so even real training data does not match the test period perfectly. At the 1-second step it scores KL about 0.22 for spread and 0.19 for returns, and SSIM 0.30. The assignment targets (KL ≤ 0.1, SSIM > 0.6) should be read with these numbers in mind.
+**Real-data reference.** The test period differs from the training period (the average spread is \$0.14 in training and \$0.11 in test), so even real training data does not match the test period perfectly. At the 1-second step it scores KL about 0.22 for spread and 0.19 for returns, and SSIM 0.30. The assignment targets (KL ≤ 0.1, SSIM > 0.6) should be read with these numbers in mind.
 
 ## Experiments and results
 
@@ -346,7 +346,7 @@ Training curves for the final TimeGAN and its matched baseline (seed 0): ![TimeG
 
 These five cases come from the final TimeGAN (quantile transform, ladder increments, feature discriminator, difference loss, 1 s step) and its matching baseline, using `predict.py` and `analyse_failures.py`. Figures are from seed 0; percentages given as averages are over seeds 0, 1 and 2.
 
-**Case 1: fake spreads fall between price ticks.** Real prices sit on a $0.01 grid, so real spreads are whole ticks. About 80% of fake spreads are more than 0.1 tick off the grid, for both models (figure below). Rounding the fake spreads to whole ticks lowers the spread KL from 1.26 to **0.31** for TimeGAN (seeds: 1.20, 1.39, 1.18 to 0.25, 0.45, 0.22) and from 1.32 to 0.33 for the baseline, against a real reference of 0.22. *Cause:* prices are made as continuous numbers and nothing pushes them onto whole ticks. Most of the stuck spread KL is this rule being broken, not a failure to learn the usual size of the spread. Rounding is a market rule applied while decoding, so it is reported separately and not used in the main tables.
+**Case 1: fake spreads fall between price ticks.** Real prices sit on a \$0.01 grid, so real spreads are whole ticks. About 80% of fake spreads are more than 0.1 tick off the grid, for both models (figure below). Rounding the fake spreads to whole ticks lowers the spread KL from 1.26 to **0.31** for TimeGAN (seeds: 1.20, 1.39, 1.18 to 0.25, 0.45, 0.22) and from 1.32 to 0.33 for the baseline, against a real reference of 0.22. *Cause:* prices are made as continuous numbers and nothing pushes them onto whole ticks. Most of the stuck spread KL is this rule being broken, not a failure to learn the usual size of the spread. Rounding is a market rule applied while decoding, so it is reported separately and not used in the main tables.
 
 ![Spread in ticks: real versus generated](figures/spread_ticks.png)
 
