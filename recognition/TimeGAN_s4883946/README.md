@@ -65,7 +65,7 @@ cd recognition/TimeGAN_s4883946
 pip install torch numpy scipy matplotlib scikit-image   # versions in the table above
 ```
 
-`<data_dir>` below is the folder holding the LOBSTER files `AMZN_2012-06-21_34200000_57600000_orderbook_10.csv` and `AMZN_2012-06-21_34200000_57600000_message_10.csv` (the data is not committed, so supply your own copy, for example `~/COMP3710/LOB_project/data` on Rangpur). Training, `predict.py` and `plot_comparison.py` also need trained model files, which are not committed either, so train first with the commands below.
+`<data_dir>` below is the folder holding the LOBSTER files `AMZN_2012-06-21_34200000_57600000_orderbook_10.csv` and `AMZN_2012-06-21_34200000_57600000_message_10.csv` (the data is not committed, so supply your own copy). Training, `predict.py` and `plot_comparison.py` also need trained model files, which are not committed either, so train first with the commands below.
 
 ```bash
 # unit and end-to-end tests (no real data needed)
