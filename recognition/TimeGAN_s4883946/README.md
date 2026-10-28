@@ -57,6 +57,14 @@ Results were produced on the Rangpur cluster (NVIDIA A100 GPUs) with these exact
 
 ## Usage
 
+The code is on the `topic-recognition` branch, so after cloning the repository switch to it and move into the project folder:
+
+```bash
+git checkout topic-recognition
+cd recognition/TimeGAN_s4883946
+pip install torch numpy scipy matplotlib scikit-image   # versions in the table above
+```
+
 ```bash
 # unit and end-to-end tests (no real data needed)
 python -m unittest test_pipeline -v
@@ -73,6 +81,10 @@ python train.py --model baseline --data-dir <data_dir> --out-dir outputs
 
 # sample from the trained models, print the comparison table and save figures
 python predict.py --data-dir <data_dir> --model-dir outputs
+
+# ten minutes of real test data next to generated data (the example-output figure)
+python plot_comparison.py --data-dir <data_dir> --model-dir outputs --model timegan \
+    --minutes 10 --out figures/real_vs_timegan_window.png
 
 # on Rangpur (Slurm): one run, or a whole experiment group
 sbatch --job-name=lob_timegan slurm_train.sh timegan
