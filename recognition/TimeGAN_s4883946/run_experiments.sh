@@ -6,6 +6,7 @@
 #   ./run_experiments.sh ladder         # price ladder as distances vs gaps between levels
 #   ./run_experiments.sh combined       # best changes from the other groups, together
 #   ./run_experiments.sh depth          # difference moment-matching loss for depth persistence
+#   ./run_experiments.sh gatesup        # hold gate supervised with the real change pattern
 #   ./run_experiments.sh improve        # longer windows and the hold-gate decoder (SBATCH_TIME=04:00:00)
 # Results land in outputs/<group>/<setting>/<model>_s<seed>/ (gitignored).
 export PATH=/opt/slurm/bin:$PATH
@@ -60,6 +61,12 @@ for seed in $SEEDS; do
             submit gate120     $model $seed $ALL --hold-gate --seq-len 120
         else
             submit len120      $model $seed $BEST --seq-len 120
+        fi ;;
+      gatesup)   # hold gate trained to open only where real features change
+        ALL="--return-transform quantile --ladder increments --feature-adv --w-diff 10 --hold-gate"
+        if [[ $model == timegan ]]; then
+            submit gate24 $model $seed $ALL
+            submit gate60 $model $seed $ALL --seq-len 60
         fi ;;
       *) echo "unknown group $GROUP"; exit 1 ;;
     esac

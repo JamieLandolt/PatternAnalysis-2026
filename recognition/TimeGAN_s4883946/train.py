@@ -61,6 +61,21 @@ def moment_loss(x_hat, x):
     return (std_hat - std_real).abs().mean() + (x_hat.mean(0) - x.mean(0)).abs().mean()
 
 
+def gate_loss(model, h, x):
+    """Teach the hold gate what real data does: open it exactly when a book feature changed.
+
+    Without this the autoencoder can reconstruct perfectly with the gate always open, so
+    nothing pushes the decoder to hold values. Target is 1 on the first step and wherever
+    a feature differs from the previous step (identical raw values stay identical after
+    normalisation, so exact comparison is safe).
+    """
+    if not hasattr(model.recovery, "gate_logits"):
+        return x.new_zeros(())
+    changed = torch.ones_like(x[..., 1:])
+    changed[:, 1:] = (x[:, 1:, 1:] != x[:, :-1, 1:]).float()
+    return nn.functional.binary_cross_entropy_with_logits(model.recovery.gate_logits(h), changed)
+
+
 def batches(loader, device, max_batches=None):
     for i, x in enumerate(loader):
         if max_batches is not None and i >= max_batches:
@@ -91,8 +106,9 @@ def train_timegan(model, loaders, args, device, history, evaluator):
     for epoch in range(args.ae_epochs):
         losses = []
         for x in batches(loaders["train"], device, args.max_batches):
-            x_tilde = model.recovery(model.embedder(x))
-            loss = 10 * torch.sqrt(nn.functional.mse_loss(x_tilde, x))
+            h = model.embedder(x)
+            x_tilde = model.recovery(h)
+            loss = 10 * torch.sqrt(nn.functional.mse_loss(x_tilde, x)) + gate_loss(model, h, x)
             opt_ae.zero_grad(); loss.backward(); opt_ae.step()
             losses.append(loss.item())
         history["ae_loss"].append(float(np.mean(losses)))
@@ -133,6 +149,7 @@ def train_timegan(model, loaders, args, device, history, evaluator):
 
                 h = model.embedder(x)
                 e_loss = (10 * torch.sqrt(nn.functional.mse_loss(model.recovery(h), x))
+                          + gate_loss(model, h, x)
                           + 0.1 * temporal_loss(h, model.supervisor(h)))
                 opt_e.zero_grad(); e_loss.backward(); opt_e.step()
 

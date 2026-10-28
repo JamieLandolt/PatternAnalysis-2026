@@ -145,6 +145,13 @@ class TestModules(unittest.TestCase):
         self.assertGreater(float(held), 0.0)
         x.pow(2).mean().backward()   # gradients reach the gate and the embedder path
         self.assertTrue(all(p.grad is not None for p in t.recovery.parameters()))
+        # the gate loss is a finite scalar with gradients, and is zero for a plain decoder
+        from train import gate_loss
+        xr = torch.randn(4, 24, N_FEATURES)
+        xr[:, 1:, 1:] = xr[:, :1, 1:]   # a window that never changes after step 0
+        loss = gate_loss(t, t.embedder(xr), xr)
+        self.assertTrue(torch.isfinite(loss) and float(loss) > 0)
+        self.assertEqual(float(gate_loss(TimeGAN(N_FEATURES, 16, 2), h, xr)), 0.0)
         # a recurrent decoder may be run for longer than it was trained on
         self.assertEqual(tuple(t.sample(2, 100).shape), (2, 100, N_FEATURES))
         self.assertGreater(count_parameters(t), count_parameters(TimeGAN(N_FEATURES, 16, 2)))

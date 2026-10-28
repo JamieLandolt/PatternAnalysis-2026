@@ -74,6 +74,10 @@ class GatedRecovery(nn.Module):
         self.value = nn.Linear(hidden_dim, feat_dim)
         self.gate = nn.Linear(hidden_dim, feat_dim - 1)
 
+    def gate_logits(self, h):
+        """Raw gate scores (B, T, F-1); positive means 'write a new value at this step'."""
+        return self.gate(self.gru(h)[0])
+
     def forward(self, h):
         out, _ = self.gru(h)
         value, p = self.value(out), torch.sigmoid(self.gate(out))
