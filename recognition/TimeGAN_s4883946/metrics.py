@@ -68,15 +68,17 @@ def microstructure_audit(raw, ladder="levels"):
     """Fraction of snapshots violating each market microstructure rule.
 
     crossed:  best ask <= best bid (spread <= 0)
-    ladder:   ask prices not increasing, or bid prices not decreasing, with depth level
+    ladder:   ask prices not strictly increasing, or bid prices not strictly decreasing,
+              with depth level (two equal adjacent prices count as a violation)
     neg_depth: any negative volume (log1p volume below 0)
     any:      at least one of the above
     windows_with_crossed: fraction of windows containing at least one crossed snapshot
     """
     ask_d, bid_d = distances(raw, ladder)
     crossed = (ask_d[..., 0] + bid_d[..., 0]) <= 0
-    ladder = ((np.diff(ask_d, axis=-1) < 0).any(-1)
-              | (np.diff(bid_d, axis=-1) < 0).any(-1))
+    # strict ordering: a gap of zero ticks between adjacent levels is also invalid
+    ladder = ((np.diff(ask_d, axis=-1) <= 0).any(-1)
+              | (np.diff(bid_d, axis=-1) <= 0).any(-1))
     neg_depth = (raw[..., ASK_VOL] < 0).any(-1) | (raw[..., BID_VOL] < 0).any(-1)
     return {
         "crossed": float(crossed.mean()),

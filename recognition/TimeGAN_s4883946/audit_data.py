@@ -25,8 +25,9 @@ def main(data_dir):
     bid_p, bid_v = ob[:, 2::4], ob[:, 3::4]
 
     print("crossed or locked books:", int((bid_p[:, 0] >= ask_p[:, 0]).sum()))
-    print("non-monotonic ask ladders:", int((np.diff(ask_p, axis=1) < 0).any(1).sum()),
-          "bid ladders:", int((np.diff(bid_p, axis=1) > 0).any(1).sum()))
+    # strict ordering: equal adjacent prices are also counted as violations
+    print("non-strict ask ladders:", int((np.diff(ask_p, axis=1) <= 0).any(1).sum()),
+          "bid ladders:", int((np.diff(bid_p, axis=1) >= 0).any(1).sum()))
     print("negative depth:", int((ask_v < 0).sum() + (bid_v < 0).sum()),
           "zero depth:", int((ask_v == 0).sum() + (bid_v == 0).sum()))
 

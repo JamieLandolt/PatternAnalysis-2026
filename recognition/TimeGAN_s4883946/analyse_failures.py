@@ -37,10 +37,10 @@ def analyse(name, raw, real_spread_ticks, ladder):
 
     # Ladder: size and place of violations (gap between successive levels, in ticks)
     gaps = np.concatenate([np.diff(ask_d, axis=-1), np.diff(bid_d, axis=-1)], axis=-1) / TICK
-    bad = (gaps < 0).any(-1)
+    bad = (gaps <= 0).any(-1)   # strict rule: a zero-tick gap is invalid too
     worst_dip = -np.minimum(gaps, 0).min(-1)[bad]
-    first_level = (np.concatenate([(np.diff(ask_d, axis=-1) < 0)[..., :2],
-                                   (np.diff(bid_d, axis=-1) < 0)[..., :2]], -1).any(-1))[bad]
+    first_level = (np.concatenate([(np.diff(ask_d, axis=-1) <= 0)[..., :2],
+                                   (np.diff(bid_d, axis=-1) <= 0)[..., :2]], -1).any(-1))[bad]
     print(f"ladder: {100 * bad.mean():.1f}% of snapshots invalid; of those, "
           f"{100 * (worst_dip <= 1).mean():.0f}% dip by at most 1 tick and "
           f"{100 * (worst_dip <= 3).mean():.0f}% by at most 3 ticks; "

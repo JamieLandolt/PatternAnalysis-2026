@@ -255,6 +255,22 @@ class TestLadderRepresentation(unittest.TestCase):
         bad[..., metrics.ASK_DIST][..., 3] = -1.0   # decoded gap expm1(-1) < 0
         self.assertGreater(metrics.microstructure_audit(bad, "increments")["ladder"], 0.9)
 
+    def test_equal_adjacent_prices_are_a_ladder_violation(self):
+        # the rule is strict ordering, so a zero-tick gap between two levels must be flagged
+        _, levels_info = get_dataloaders(self.tmp.name, ladder="levels")
+        bad = real_windows(levels_info, "test").copy()
+        bad[..., metrics.ASK_DIST][..., 3] = bad[..., metrics.ASK_DIST][..., 2]
+        self.assertGreater(metrics.microstructure_audit(bad)["ladder"], 0.9)
+        bad = real_windows(levels_info, "test").copy()
+        bad[..., metrics.BID_DIST][..., 5] = bad[..., metrics.BID_DIST][..., 4]
+        self.assertGreater(metrics.microstructure_audit(bad)["ladder"], 0.9)
+        loaders, info = get_dataloaders(self.tmp.name, ladder="increments")
+        zero_gap = real_windows(info, "test").copy()
+        zero_gap[..., metrics.ASK_DIST][..., 3] = 0.0   # decoded gap expm1(0) == 0
+        self.assertGreater(metrics.microstructure_audit(zero_gap, "increments")["ladder"], 0.9)
+        # real windows still pass: their gaps are at least one tick
+        self.assertEqual(metrics.microstructure_audit(real_windows(info, "test"), "increments")["ladder"], 0.0)
+
     def test_unknown_ladder_raises(self):
         with self.assertRaises(ValueError):
             build_features(np.zeros((3, 40)), ladder="nope")
