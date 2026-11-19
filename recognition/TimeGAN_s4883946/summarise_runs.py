@@ -3,25 +3,38 @@
 Benchmarks each setting on the test metrics and on resources (parameters, training
 time, peak GPU memory).
 
-Usage: python summarise_runs.py outputs/transform [outputs/step ...]
+Usage: python summarise_runs.py [--split test|val] outputs/transform [outputs/step ...]
+--split val ranks settings on the validation split instead (the metrics stored at each
+run's best epoch), which is the data settings should be chosen on. "score" is the
+selection criterion used for checkpoints: KL spread + KL return (lower is better).
 Reads <group>/<setting>/<model>_s<seed>/<model>_summary.json written by train.py and
 prints a markdown table next to the real-data reference (real train windows scored
 against real test windows) for the same setting.
 """
+import argparse
 import glob
 import json
 import os
-import sys
 
 import numpy as np
 
-COLS = ["audit_ladder", "audit_crossed", "kl_spread", "kl_return", "ssim",
+COLS = ["audit_ladder", "audit_crossed", "kl_spread", "kl_return", "score", "ssim",
         "acf_lag1", "acf_lag5"]
 # resource profile recorded by train.py (peak VRAM is None on CPU runs)
 RES = [("params", "parameters"), ("train_s", "train_seconds"), ("vram_mb", "peak_vram_mb")]
 
 
-def main(groups):
+def split_metrics(run, split):
+    """Metrics of one run on the test split, or on the validation split at its best epoch."""
+    if split == "test":
+        m = dict(run["test"])
+    else:
+        m = dict(next(v for v in run["history"]["val"] if v["epoch"] == run["best_epoch"]))
+    m["score"] = m["kl_spread"] + m["kl_return"]
+    return m
+
+
+def main(groups, split="test"):
     """Print one markdown row per (setting, model), with a real-data reference row after each."""
     heads = COLS + [r[0] for r in RES]
     print("| group | setting | model | seeds | " + " | ".join(heads) + " |")
@@ -36,10 +49,10 @@ def main(groups):
                 if not runs:
                     continue
                 # every run stores the same real train-vs-test reference, so averaging is safe
-                refs += [r["reference"] for r in runs if "reference" in r]
+                refs += [r["reference"] for r in runs if "reference" in r and split == "test"]
                 cells = []
                 for c in COLS:
-                    v = np.array([r["test"][c] for r in runs])
+                    v = np.array([split_metrics(r, split)[c] for r in runs])
                     cells.append(f"{v.mean():.3f} ± {v.std():.3f}" if len(v) > 1 else f"{v[0]:.3f}")
                 for _, key in RES:
                     v = [r["profile"][key] for r in runs if r["profile"].get(key) is not None]
@@ -47,10 +60,15 @@ def main(groups):
                 print(f"| {os.path.basename(group)} | {setting} | {model} | {len(runs)} | "
                       + " | ".join(cells) + " |")
             if refs:
-                cells = [f"{np.mean([r[c] for r in refs]):.3f}" for c in COLS] + ["-"] * len(RES)
+                cells = [f"{np.mean([r[c] for r in refs]):.3f}" if c in refs[0] else "-"
+                         for c in COLS] + ["-"] * len(RES)
                 print(f"| {os.path.basename(group)} | {setting} | real train vs test | - | "
                       + " | ".join(cells) + " |")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("groups", nargs="+")
+    ap.add_argument("--split", choices=["test", "val"], default="test")
+    args = ap.parse_args()
+    main(args.groups, args.split)
