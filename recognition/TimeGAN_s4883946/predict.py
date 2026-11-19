@@ -22,7 +22,7 @@ import torch
 
 import metrics
 from dataset import LEVELS, N_FEATURES, TICK, denormalise, get_dataloaders, real_windows
-from modules import build_model
+from modules import build_model, time_sampling
 
 LADDER = "levels"   # set from the checkpoint in main()
 COLOURS = {"real": "black", "timegan": "tab:blue", "baseline": "tab:orange"}
@@ -167,8 +167,16 @@ def main():
     p.add_argument("--models", nargs="+", default=["timegan", "baseline"])
     p.add_argument("--n-samples", type=int, default=3000)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--time-sampling", action="store_true",
+                   help="only time sampling of 1,000 windows per model (GPU if available) and exit")
     args = p.parse_args()
     torch.manual_seed(args.seed)
+    if args.time_sampling:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        for name in args.models:
+            model, cfg = load_model(f"{args.model_dir}/{name}.pt", device)
+            print(f"{name}: {1000 * time_sampling(model, cfg['seq_len']):.2f} ms for 1000 windows on {device}")
+        return
     device = torch.device("cpu")   # sampling is cheap, no GPU needed
     fig_dir = f"{args.model_dir}/figures"
     os.makedirs(fig_dir, exist_ok=True)

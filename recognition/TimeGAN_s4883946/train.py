@@ -31,7 +31,7 @@ from torch import nn
 
 import metrics
 from dataset import N_FEATURES, denormalise, get_dataloaders, real_windows
-from modules import build_model, count_parameters
+from modules import build_model, count_parameters, time_sampling
 
 GAMMA = 1.0          # weight of the discriminator term on raw generator output
 D_THRESHOLD = 0.15   # only update the discriminator when it is not already winning
@@ -314,7 +314,7 @@ def main():
     # real test windows (the floor any generator is measured against)
     reference = metrics.evaluate(raw["test"], raw["train"][:: max(1, len(raw["train"]) // args.n_eval)],
                                  reference_raw=raw["test"], ladder=args.ladder)
-    t1 = time.time(); model.sample(1000, args.seq_len, device); latency = time.time() - t1
+    latency = time_sampling(model, args.seq_len)   # synchronised, so it covers finished GPU work
     profile = {
         "parameters": count_parameters(model), "train_seconds": train_seconds,
         "sample_1000_windows_seconds": latency, "device": str(device),

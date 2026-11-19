@@ -20,6 +20,9 @@ add.
 
 This module depends only on PyTorch.
 """
+import statistics
+import time
+
 import torch
 from torch import nn
 
@@ -166,6 +169,25 @@ class RecurrentGAN(nn.Module):
 def count_parameters(model):
     """Number of trainable parameters."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def time_sampling(model, seq_len, n=1000, repeats=5):
+    """Median seconds to generate n windows, with the GPU work finished before the clock stops.
+
+    CUDA kernels run asynchronously, so a plain timer would only measure the launch. The
+    first call is a warm-up (memory allocation, kernel setup) and is not timed.
+    """
+    device = next(model.parameters()).device
+    sync = torch.cuda.synchronize if device.type == "cuda" else (lambda: None)
+    model.sample(n, seq_len, device)
+    times = []
+    for _ in range(repeats):
+        sync()
+        start = time.perf_counter()
+        model.sample(n, seq_len, device)
+        sync()
+        times.append(time.perf_counter() - start)
+    return statistics.median(times)
 
 
 def build_model(name, feat_dim, hidden_dim=64, num_layers=3, feature_adv=False, hold_gate=False):

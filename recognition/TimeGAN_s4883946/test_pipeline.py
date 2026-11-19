@@ -21,7 +21,7 @@ from dataset import (LEVELS, N_FEATURES, PREFIX, PRICE_SCALE, apply_return_trans
                      book_to_levels, build_features, chronological_split, denormalise,
                      features_to_book, fit_return_transform, get_dataloaders,
                      invert_return_transform, load_lob, real_windows, resample_to_grid)
-from modules import RecurrentGAN, TimeGAN, build_model, count_parameters
+from modules import RecurrentGAN, TimeGAN, build_model, count_parameters, time_sampling
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TICK_UNITS = 100  # one $0.01 tick in LOBSTER price units (1/10,000 dollar)
@@ -155,6 +155,11 @@ class TestModules(unittest.TestCase):
         # a recurrent decoder may be run for longer than it was trained on
         self.assertEqual(tuple(t.sample(2, 100).shape), (2, 100, N_FEATURES))
         self.assertGreater(count_parameters(t), count_parameters(TimeGAN(N_FEATURES, 16, 2)))
+
+    def test_time_sampling_returns_positive_seconds(self):
+        for model in (TimeGAN(N_FEATURES, 16, 2), RecurrentGAN(N_FEATURES, 16, 2)):
+            seconds = time_sampling(model, 24, n=50, repeats=2)
+            self.assertGreater(seconds, 0.0)
 
     def test_build_model(self):
         self.assertIsInstance(build_model("timegan", N_FEATURES), TimeGAN)
